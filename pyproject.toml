@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-plugins"
+version = "1.0.0"
+description = "Hermes Agent plugins by bacnh85"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "bacnh85", email = "mail@bacnh.com" }]
+keywords = ["hermes", "hermes-agent", "plugin", "omniroute", "model-provider"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.entry-points."hermes_agent.plugins"]
+# Bare-module target: imported for its module-level register_provider() side
+# effect, mirroring the directory-plugin __init__.py contract. See
+# providers/__init__.py::_discover_entry_point_providers.
+omniroute = "omniroute"
+
+[project.entry-points."hermes_agent.plugin_capabilities"]
+"omniroute.llm.provider_override" = "omniroute"
+
+[tool.setuptools]
+# Ship the plugin's own __init__.py (its register_provider call) plus the
+# plugin.yaml manifest so it carries a proper plugin.yaml even when installed
+# via pip.
+packages = ["omniroute"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+"omniroute" = ["plugin.yaml", "README.md"]

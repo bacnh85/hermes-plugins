@@ -1,0 +1,16 @@
+name: omniroute
+kind: model-provider
+version: 1.0.0
+description: OmniRoute — free OpenAI-compatible multi-provider AI gateway
+author: bacnh85
+manifest_version: 2
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins
+tags: [provider, model-provider, omniroute, gateway]
+requires_env:
+  - name: OMNIROUTE_API_KEY
+    description: "OmniRoute API key (Bearer token)"
+    url: "https://omniroute.online/"
+    secret: true
+capabilities:
+  - llm.provider_override
