@@ -1,126 +1,129 @@
 # hermes-plugins
 
-Hermes Agent plugins, published by **bacnh85**.
+Plugins for [Hermes Agent](https://hermes-agent.nousresearch.com), published
+by **bacnh85**.
 
-This repo ships ready-to-install plugins for [Hermes Agent](https://hermes-agent.nousresearch.com)
-so you don't have to re-implement the same provider/backend on every Hermes
-instance you run (CLI, desktop, gateway, LXC/CI, …).
+The idea: you run Hermes on several machines (CLI, desktop, gateway, LXC/CI,
+…). Instead of re-implementing the same provider or backend on each one, this
+repo ships ready-to-install plugins and a small installer so every machine can
+pick them up in one command.
 
-Each plugin lives in its own directory. See the per-plugin README for setup.
-
-## Plugins in this repo
-
-| Plugin | Kind | What it does |
-|---|---|---|
-| [`omniroute/`](./omniroute) | model-provider | Add OmniRoute as a `model.provider` (OpenAI-compatible gateway). |
-
-More plugins will be added here over time.
-
-### One-command bootstrap installer
-
-For a fleet of Hermes machines (CLI, desktop, gateway, LXC/CI, Windows/macOS
-/Linux), [`install_omniroute.py`](./install_omniroute.py) installs the plugin,
-wires `.env`, and points `model.provider` at omniroute — stdlib only, no pip
-deps, works on Windows:
-
-```bash
-# clone once, then run on each machine:
-python install_omniroute.py
-```
-
-It resolves `$HERMES_HOME` (or `~/.hermes`), copies the plugin into
-`$HERMES_HOME/plugins/model-providers/omniroute` (the dir discovery reads),
-prompts for `OMNIROUTE_API_KEY` if unset, and sets the provider. Pass
-`--no-config` to install only.
+Each plugin lives in its own directory with its own `plugin.yaml` manifest.
 
 ---
 
-## Installing a plugin
+## Available plugins
 
-You have two supported options. Pick whichever fits your workflow.
+| Plugin | Kind | What it does |
+|---|---|---|
+| [`omniroute/`](./omniroute) | model-provider | Add OmniRoute as a Hermes `model.provider` (OpenAI-compatible routing gateway). |
 
-### Option A — pip (recommended, first-class for provider plugins)
+---
 
-Provider plugins are discovered by Hermes through the `hermes_agent.plugins`
-entry-point group. Install this repo into the Hermes Python environment, then
-tell Hermes to load it:
+## Quick start (recommended)
+
+Clone the repo once, then run the installer on each machine you want to use
+the plugin on:
 
 ```bash
-# 1. Install into the Hermes venv
-~/.hermes/hermes-agent/venv/bin/pip install -e git+https://github.com/bacnh85/hermes-plugins.git#egg=hermes-plugins
-
-# 2. Enable the plugin (entry-point plugins are opt-in)
-hermes plugins enable omniroute
-
-# 3. Add your API key to ~/.hermes/.env
-#    OMNIROUTE_API_KEY=your-key-here
+git clone https://github.com/bacnh85/hermes-plugins
+cd hermes-plugins
+python install_plugins.py           # installs every plugin in the repo
 ```
 
-> Entry-point plugins are gated by `plugins.enabled` — a plugin is never
-> imported just because it's pip-installed. `hermes plugins enable <name>`
-> adds it to the allow-list for you.
+That one command, per machine, will:
 
-### Option B — directory drop (what the fleet installer uses)
+- find your Hermes home (`$HERMES_HOME`, or `~/.hermes`),
+- copy each plugin into the directory its own discovery system reads (see
+  *How install works* below),
+- prompt you for any API keys the plugin declares (and save them to `.env`),
+- and point Hermes at the provider (for model-provider plugins).
 
-`hermes plugins install` drops plugins into `$HERMES_HOME/plugins/<name>/`,
-which the provider-discovery scanner (which reads
-`$HERMES_HOME/plugins/model-providers/`) does **not** pick up. So for
-model-provider plugins, drop the plugin directory in the location discovery
-actually reads:
+You can also install a subset:
 
 ```bash
-# Clone once, then copy the plugin(s) where provider discovery looks:
+python install_plugins.py omniroute          # just one plugin
+python install_plugins.py omniroute other    # several
+python install_plugins.py --no-config        # install only; never touch config or .env
+python install_plugins.py --symlink          # symlink instead of copy (dev: live updates)
+```
+
+`--symlink` is handy on a dev machine — the plugin directory is linked straight
+to the repo, so edits apply on the next Hermes start without reinstalling.
+
+> The installer is **stdlib-only** and works on Windows, macOS, and Linux. No
+> pip dependencies required.
+
+---
+
+## How the plugins are installed
+
+Hermes discovers different plugin kinds in different sub-directories of its
+plugin home. The installer reads each plugin's `kind` from `plugin.yaml` and
+routes the plugin to the right place:
+
+| kind | Installed to |
+|---|---|
+| `model-provider` | `$HERMES_HOME/plugins/model-providers/<name>` |
+| `memory` | `$HERMES_HOME/plugins/memory/<name>` |
+| anything else (general plugin) | `$HERMES_HOME/plugins/<name>` |
+
+For example, `omniroute` (a model provider) lands at
+`~/.hermes/plugins/model-providers/omniroute`, where Hermes' provider discovery
+actually looks.
+
+---
+
+## Installing without the installer
+
+If you'd rather do it by hand, "drop the directory" is the equivalent of what
+the installer does under the hood:
+
+```bash
 git clone https://github.com/bacnh85/hermes-plugins
 mkdir -p ~/.hermes/plugins/model-providers
 cp -r hermes-plugins/omniroute ~/.hermes/plugins/model-providers/omniroute
 ```
 
-Next session, `hermes doctor` lists the provider under **Provider
-Connectivity**. On a dev machine that edits this repo, symlink instead of
-copy so changes apply immediately:
+Next Hermes start (or `hermes doctor`) picks up the provider.
+
+### Via pip (entry point)
+
+The repo also distributes over pip. Provider plugins are discovered through
+the `hermes_agent.plugins` entry-point group:
 
 ```bash
-ln -s /path/to/hermes-plugins/omniroute ~/.hermes/plugins/model-providers/omniroute
+~/.hermes/hermes-agent/venv/bin/pip install -e git+https://github.com/bacnh85/hermes-plugins.git#egg=hermes-plugins
+hermes plugins enable omniroute          # entry-point plugins are opt-in
 ```
 
 ---
 
-## Why not just `hermes plugins install <repo>`? (verified, 2026-08)
+## A note on `hermes plugins install`
 
-`hermes plugins install` is the **official** CLI for general plugins, and it
-installs correctly — but it targets the **general** plugin directory, so it is
-the wrong tool for a **model-provider** plugin. Verified against this Hermes:
+You might expect `hermes plugins install <owner>/<repo>` to be the way to
+install these. It's a real, official CLI command — but it installs **general**
+plugins into the top-level `~/.hermes/plugins/<name>/` directory, which the
+**model-provider** discovery system does not read. So for this repo's plugins
+(which are model providers), `hermes plugins install` reports success but the
+provider never registers.
+
+Verified against the current release:
 
 ```
 hermes plugins install bacnh85/hermes-plugins/omniroute
-# -> "✓ Installed: .../plugins/omniroute"  (env-var prompt works, scans pass)
-# -> but the provider does NOT register:
-#    get_provider_profile("omniroute") is None
+# -> "✓ Installed: .../plugins/omniroute"  (env-var prompt, security scan all pass)
+# -> but get_provider_profile("omniroute") is None
 #    because provider discovery only scans plugins/model-providers/<name>/
 ```
 
-Three concrete facts drive the docs above:
-
-1. **`hermes plugins install` has no local-path support.** It accepts an
-   `owner/repo` shorthand, a git URL, or a community-index name — a bare
-   local directory is not valid input.
-2. **It always installs to the top-level** `$HERMES_HOME/plugins/<name>/`
-   (general-plugin dir). Model-provider discovery reads
-   `$HERMES_HOME/plugins/model-providers/<name>/`, so a provider installed
-   via `hermes plugins install` never registers. The CLI even prompts you to
-   `hermes plugins enable` it — but enabling touches the general PluginManager,
-   not the provider registry.
-3. **`manifest_version` must be ≤ the supported cap.** This Hermes refuses a
-   v2 manifest at install time (`manifest_version: 2` -> "installer only
-   supports up to 1"). Repo plugins target v1 so any Hermes can install them.
-
-That's why this repo ships the directory-drop (Option B) and the pip
-entry-point (Option A), and why `hermes plugins install` alone is not
-sufficient for model providers here.
+That's why this repo ships the directory-drop / installer approach above.
 
 ---
 
 ## Using a plugin after install
+
+Model-provider example (`omniroute`):
 
 ```bash
 hermes model                                  # pick OmniRoute + a model (fetches live /models)
@@ -129,43 +132,45 @@ hermes config set model.provider omniroute
 hermes config set model.model <model-id>
 ```
 
-Secret (`OMNIROUTE_API_KEY`) lives in `~/.hermes/.env`; all non-secret
-settings go in `config.yaml` via `hermes config set`.
+API keys (secrets) go in `~/.hermes/.env`; all non-secret settings go in
+`config.yaml` via `hermes config set` (never hand-edit `config.yaml`).
+
+See each plugin's own README for specific env vars and usage.
 
 ---
 
-## Developing / adding a plugin
+## Adding a new plugin to this repo
 
-Each plugin is a self-contained directory:
+A plugin is a self-contained directory with a `plugin.yaml` manifest:
 
 ```
 omniroute/
-├── __init__.py     # register_provider(ProviderProfile) at module level
-├── plugin.yaml     # manifest — kind: model-provider + requires_env
-└── README.md
+├── __init__.py     # registers the provider/plugin (module-level side effect)
+├── plugin.yaml     # name, kind, requires_env, ...
+└── README.md       # per-plugin setup + usage
 ```
 
-`pyproject.toml` at the repo root declares the `hermes_agent.plugins` entry
-point for pip distribution. Add a new plugin by adding a directory + a
-`[project.entry-points."hermes_agent.plugins"]` line.
+To add a new one:
 
-Validate a model-provider before releasing with the actual registration
-path (not `hermes plugins doctor`, which checks the general `register(ctx)`
-API — model-providers register via module-level `register_provider`):
+1. Create the directory + `__init__.py` + `plugin.yaml` (set a unique `name`;
+   keep `manifest_version` at `1` so any Hermes can install it).
+2. Add a `[project.entry-points."hermes_agent.plugins"]` line in
+   `pyproject.toml` if distributing via pip.
+3. Add a row to the plugin table above.
+
+### Validating a model-provider plugin
+
+`hermes plugins doctor` only checks general `register(ctx)` plugins; model
+providers register at module level, so verify them directly from the Hermes
+venv:
 
 ```python
-# from the Hermes venv
 from providers import get_provider_profile, list_providers
 assert "omniroute" in [p.name for p in list_providers()]
-get_provider_profile("omniroute").fetch_models(timeout=12)   # live /models
+get_provider_profile("omniroute").fetch_models(timeout=12)   # live /models probe
 ```
 
-## Releasing
-
-```bash
-git add -A && git commit -m "feat: add omniroute model-provider plugin"
-git push origin main
-```
+---
 
 ## License
 
