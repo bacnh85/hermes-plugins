@@ -6,19 +6,23 @@ OmniRoute is an OpenAI-compatible routing gateway. This plugin lets Hermes
 route inference through it from `.env` credentials:
 
 - `OMNIROUTE_API_KEY`  — API key (Bearer token)
-- `OMNIROUTE_BASE_URL` — base URL override (optional; default `https://omniroute.bacnh.com/v1`)
+- `OMNIROUTE_BASE_URL` — base URL override (optional; default `http://localhost:20128/v1`)
 
 Both belong in `~/.hermes/.env`.
 
 ## Install
 
-See the [repo README](../README.md). Recommended: `pip install` + `hermes
-plugins enable omniroute`. Or drop this directory at
+See the [repo README](../README.md) — the two supported paths are **pip
+entry-point** or **directory drop** into
 `~/.hermes/plugins/model-providers/omniroute/`.
 
-> Note for model-provider plugins: `hermes plugins install` copies into
-> `$HERMES_HOME/plugins/<name>/`, which the provider scanner does **not**
-> read — use the pip path or the `model-providers/` directory drop above.
+> **`hermes plugins install` is NOT the way to install this plugin.** It has
+> no local-path support and always installs to
+> `$HERMES_HOME/plugins/<name>/` — the provider scanner does **not** read
+> that location, so the provider would never register. The CLI's "✓ Installed"
+> is misleading for model providers. Use the directory drop (or symlink) or
+> the pip entry-point path from the repo README. On a dev machine editing
+> this repo: `ln -s .../hermes-plugins/omniroute ~/.hermes/plugins/model-providers/omniroute`.
 
 ## Use
 
@@ -53,4 +57,4 @@ models = p.fetch_models(timeout=12)   # live /models probe
 ## Files
 
 - `__init__.py` — `OmniRouteProfile(ProviderProfile)` + `register_provider(...)`
-- `plugin.yaml`   — manifest (`kind: model-provider`, `requires_env`, v2 fields)
+- `plugin.yaml`   — manifest (`kind: model-provider`, `requires_env`; v1 to stay install-compatible)

@@ -60,7 +60,7 @@ hermes plugins enable omniroute
 > imported just because it's pip-installed. `hermes plugins enable <name>`
 > adds it to the allow-list for you.
 
-### Option B — directory drop
+### Option B — directory drop (what the fleet installer uses)
 
 `hermes plugins install` drops plugins into `$HERMES_HOME/plugins/<name>/`,
 which the provider-discovery scanner (which reads
@@ -76,7 +76,47 @@ cp -r hermes-plugins/omniroute ~/.hermes/plugins/model-providers/omniroute
 ```
 
 Next session, `hermes doctor` lists the provider under **Provider
-Connectivity**.
+Connectivity**. On a dev machine that edits this repo, symlink instead of
+copy so changes apply immediately:
+
+```bash
+ln -s /path/to/hermes-plugins/omniroute ~/.hermes/plugins/model-providers/omniroute
+```
+
+---
+
+## Why not just `hermes plugins install <repo>`? (verified, 2026-08)
+
+`hermes plugins install` is the **official** CLI for general plugins, and it
+installs correctly — but it targets the **general** plugin directory, so it is
+the wrong tool for a **model-provider** plugin. Verified against this Hermes:
+
+```
+hermes plugins install bacnh85/hermes-plugins/omniroute
+# -> "✓ Installed: .../plugins/omniroute"  (env-var prompt works, scans pass)
+# -> but the provider does NOT register:
+#    get_provider_profile("omniroute") is None
+#    because provider discovery only scans plugins/model-providers/<name>/
+```
+
+Three concrete facts drive the docs above:
+
+1. **`hermes plugins install` has no local-path support.** It accepts an
+   `owner/repo` shorthand, a git URL, or a community-index name — a bare
+   local directory is not valid input.
+2. **It always installs to the top-level** `$HERMES_HOME/plugins/<name>/`
+   (general-plugin dir). Model-provider discovery reads
+   `$HERMES_HOME/plugins/model-providers/<name>/`, so a provider installed
+   via `hermes plugins install` never registers. The CLI even prompts you to
+   `hermes plugins enable` it — but enabling touches the general PluginManager,
+   not the provider registry.
+3. **`manifest_version` must be ≤ the supported cap.** This Hermes refuses a
+   v2 manifest at install time (`manifest_version: 2` -> "installer only
+   supports up to 1"). Repo plugins target v1 so any Hermes can install them.
+
+That's why this repo ships the directory-drop (Option B) and the pip
+entry-point (Option A), and why `hermes plugins install` alone is not
+sufficient for model providers here.
 
 ---
 
