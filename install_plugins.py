@@ -243,13 +243,18 @@ def ensure_env(home: Path, meta: dict) -> None:
     for var in meta["requires_env"]:
         if var in have:
             continue
+        label = f"  {var} for '{meta['name']}'"
         if _looks_secret(var):
-            val = getpass.getpass(f"  {var} for '{meta['name']}': ").strip()
-            if var == "OMNIROUTE_BASE_URL" and not val:
-                # base URL is optional; default handled by the provider
-                continue
+            label += ": "
+            prompt = lambda: getpass.getpass(label)  # noqa: E731
         else:
-            val = input(f"  {var} for '{meta['name']}': ").strip()
+            label += ": "
+            prompt = lambda: input(label)  # noqa: E731
+        try:
+            val = prompt().strip()
+        except (EOFError, KeyboardInterrupt):
+            log(f"  (skipped) no value given for {var}; set it in .env later")
+            continue
         if val:
             lines.append(f"{var}={val}")
             have.add(var)
