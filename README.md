@@ -16,6 +16,23 @@ Each plugin lives in its own directory. See the per-plugin README for setup.
 
 More plugins will be added here over time.
 
+### One-command bootstrap installer
+
+For a fleet of Hermes machines (CLI, desktop, gateway, LXC/CI, Windows/macOS
+/Linux), [`install_omniroute.py`](./install_omniroute.py) installs the plugin,
+wires `.env`, and points `model.provider` at omniroute — stdlib only, no pip
+deps, works on Windows:
+
+```bash
+# clone once, then run on each machine:
+python install_omniroute.py
+```
+
+It resolves `$HERMES_HOME` (or `~/.hermes`), copies the plugin into
+`$HERMES_HOME/plugins/model-providers/omniroute` (the dir discovery reads),
+prompts for `OMNIROUTE_API_KEY` if unset, and sets the provider. Pass
+`--no-config` to install only.
+
 ---
 
 ## Installing a plugin
