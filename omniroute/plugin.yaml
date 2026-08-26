@@ -1,5 +1,5 @@
 name: omniroute
-kind: standalone
+kind: model-provider
 version: 1.1.0
 description: OmniRoute — free OpenAI-compatible multi-provider AI gateway
 author: bacnh85

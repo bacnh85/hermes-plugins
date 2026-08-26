@@ -50,11 +50,18 @@ class OmniRouteProfile(ProviderProfile):
         *,
         api_key: str | None = None,
         base_url: str | None = None,
-        timeout: float = 8.0,
+        timeout: float = 30.0,
     ) -> list[str] | None:
         # Honour a remote/custom instance set via the env var before falling
         # back to the caller-supplied base or the profile default. The built-in
         # implementation appends "/models" to whatever base we hand it.
+        #
+        # Timeout: the default fetch_models timeout is 8s, but OmniRoute
+        # instances (especially self-hosted or reverse-proxied ones) can take
+        # ~10s+ to answer /v1/models on a cold start. At the default timeout
+        # the probe times out and the picker falls back to the static
+        # auto/* fallback models — "can't select models". Raise the ceiling
+        # to 30s so the live catalog actually loads.
         resolved = (
             os.getenv("OMNIROUTE_BASE_URL", "").strip()
             or base_url

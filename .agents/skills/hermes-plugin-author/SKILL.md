@@ -20,21 +20,27 @@ Do not use this skill for general Hermes internals outside the repo (use the her
 ```
 <plugin-name>/
 ├── __init__.py     # defines the profile, calls register_provider(...) at import, no-op register(ctx)
-├── plugin.yaml     # manifest: name, kind: standalone, requires_env, version, ...
+├── plugin.yaml     # manifest: name, kind: model-provider, requires_env, version, ...
 └── README.md       # install + env table + verify snippet
 ```
 
 ## The kind rule (the hard-won one)
 
-Use **`kind: standalone`**, not `kind: model-provider`. Why:
+Use **`kind: model-provider`**, not `kind: standalone`. Why:
 
-- `hermes plugins install` always drops the plugin at `~/.hermes/plugins/<name>/` (top-level general dir). See `hermes_cli/plugins_cmd.py::_install_plugin_core` (~line 715) and `_sanitize_plugin_name` (~line 159, rejects subdirs).
-- The general loader (`hermes_cli/plugins.py::_discover_and_load_inner` ~line 4135–4146) explicitly *skips* `kind: model-provider` plugins in the top-level dir — it records them for introspection only.
-- Provider discovery (`providers/__init__.py::_discover_providers`) only scans `$HERMES_HOME/plugins/model-providers/<name>/` + pip entry points. So a `kind: model-provider` plugin at the top-level path is **never imported** — provider never registers, even though the CLI printed "✓ Installed" and "✓ Enabled".
+- Model-provider plugins are discovered by `providers/__init__.py::_discover_providers()`, which scans **only** `$HERMES_HOME/plugins/model-providers/<name>/` (+ pip entry points). The provider registry imports the module at first `list_providers()` call — **before** `hermes_cli.auth.PROVIDER_REGISTRY` and `hermes_cli.models.CANONICAL_PROVIDERS` build, so the provider lands in the picker and credential resolution automatically.
+- `kind: standalone` in the **general** plugins dir (`~/.hermes/plugins/<name>/`) does get imported by the general loader (`hermes_cli/plugins.py::_discover_and_load_inner`), and module-level `register_provider()` fires — but **too late**: `PROVIDER_REGISTRY`/`CANONICAL_PROVIDERS` were already built at import time and are never re-extended. Result: the provider shows as "enabled" in `hermes plugins list` and even appears in doctor, but `hermes model` finds **no models** — only the static `auto/*` fallback models.
+- `kind: model-provider` in the **general** dir is worse: the general loader skips it entirely (records for introspection only) and the provider registry never scans there → nothing registers at all.
 
-With `kind: standalone` + the plugin in `plugins.enabled`, the general loader imports `__init__.py` and module-level `register_provider(profile)` fires → the provider shows up in `hermes model`, `hermes doctor`, and `get_provider_profile()`.
+So the plugin must live at `$HERMES_HOME/plugins/model-providers/<name>/`.
 
-The `model-providers/<name>/` drop-in path and the pip entry-point path (`hermes_agent.plugins` group, see `pyproject.toml`) keep working too.
+**Install paths that work** (all land in `model-providers/`):
+- `python3 install_plugins.py <name>` from a clone of this repo (kind-aware installer, routes by `kind`)
+- directory drop: `cp -r <name> ~/.hermes/plugins/model-providers/<name>`
+- dev symlink: `ln -s "$PWD/<name>" ~/.hermes/plugins/model-providers/<name>`
+- pip entry point (`hermes_agent.plugins` group, see `pyproject.toml`)
+
+**`hermes plugins install bacnh85/hermes-plugins/<name>` does NOT work** for provider plugins: it always installs to `~/.hermes/plugins/<name>/` (the general dir) regardless of kind. The CLI prints "✓ Installed / ✓ Enabled" but the provider either never registers (`kind: model-provider`) or registers too late for the picker (`kind: standalone`).
 
 ## Provider profile template
 
@@ -60,7 +66,10 @@ DEFAULT_<PLUGIN>_BASE_URL = "https://example.com/v1"  # not http://localhost —
 class <PluginName>Profile(ProviderProfile):
     """<One-line description>."""
 
-    def fetch_models(self, *, api_key=None, base_url=None, timeout=8.0):
+    def fetch_models(self, *, api_key=None, base_url=None, timeout=30.0):
+        # 30s default: self-hosted / reverse-proxied endpoints can take ~10s+
+        # cold to answer /v1/models. At the 8s base default the probe times
+        # out and the picker falls back to static models ("can't select").
         resolved = os.getenv("<PLUGIN>_BASE_URL", "").strip() or base_url or self.base_url
         return super().fetch_models(api_key=api_key, base_url=resolved, timeout=timeout)
 
@@ -102,7 +111,7 @@ Field notes:
 
 ```yaml
 name: <plugin-slug>           # unique; matches directory name
-kind: standalone              # see kind rule above
+kind: model-provider          # see kind rule above
 version: 0.1.0                # bump on each publish
 description: <one-line>
 author: <github user>
@@ -126,28 +135,27 @@ requires_env:
 
 1. Create `<name>/` with `__init__.py` (template above), `plugin.yaml`, `README.md`.
 2. Add to `pyproject.toml` entry points: `[project.entry-points."hermes_agent.plugins"]` line + (optional) `[project.entry-points."hermes_agent.plugin_capabilities"]` line.
-3. Add a row to root `README.md`'s plugin table with the `hermes plugins install bacnh85/hermes-plugins/<name>` command.
+3. Add a row to root `README.md`'s plugin table with the `install_plugins.py <name>` command.
 4. Add verify snippet to the plugin's README.
 5. Bump `version`.
 6. Run the verification below from the Hermes venv.
 
-## Multi-plugin install (the user's question)
+## Multi-plugin install
 
 For a repo that ships multiple top-level plugin dirs (e.g. `omniroute/`,
-`other/`), the install is **one `hermes plugins install` per plugin**:
+`other/`), install each with the kind-aware installer from a clone:
 
 ```bash
-hermes plugins install bacnh85/hermes-plugins/omniroute
-hermes plugins install bacnh85/hermes-plugins/other-plugin
+git clone https://github.com/bacnh85/hermes-plugins
+cd hermes-plugins
+python3 install_plugins.py omniroute
+python3 install_plugins.py other-plugin
 ```
 
-`hermes plugins install` accepts `<owner>/<repo>/<subdir>` shorthand; the
-subdir picks the plugin. **There is no interactive plugin picker.** A bare
-`<owner>/<repo>` (no subdir) won't work because the repo root has no
-`plugin.yaml` — the install would fail. Each install clones the full repo
-once and takes only the named subdir; on a multi-machine fleet, expect one
-clone per plugin per machine (small repo, but it adds up if the repo
-grows).
+The installer routes each plugin by its `kind` into the directory its
+discovery system reads. **Do not use `hermes plugins install` for provider
+plugins** — it always installs to the general `plugins/<name>/` dir, which
+model-provider discovery never scans (see the kind rule).
 
 ## Verification (from `~/.hermes/hermes-agent/` venv)
 
@@ -169,17 +177,18 @@ print(p.name, p.base_url, p.env_vars)
 
 End-to-end on the target machine:
 ```bash
-hermes plugins install bacnh85/hermes-plugins/<plugin-slug>
-# answer prompts, say y to "Enable <plugin-slug> now?"
+cd hermes-plugins
+python3 install_plugins.py <plugin-slug>     # routes into plugins/model-providers/
 hermes gateway restart
-hermes plugins list                              # no "no register() function" error
-hermes doctor                                    # provider connectivity probe
-hermes model                                     # <PluginName> appears in picker
+hermes plugins list                          # no "no register() function" error
+hermes doctor                                # provider connectivity probe
+hermes model                                 # <PluginName> appears in picker WITH models
 ```
 
 ## Footgun recap
 
-- `kind: model-provider` → CLI install reports success, provider never registers. Always use `kind: standalone` for `hermes plugins install`-friendly plugins.
+- `hermes plugins install .../<plugin>` installs into the general dir — provider never becomes selectable in the picker. Install into `plugins/model-providers/` (install_plugins.py / drop / symlink).
 - Forgetting `def register(ctx)` → "no register() function" warning + error field in `hermes plugins list`. Add the no-op.
 - Hardcoding `http://localhost:...` as the default base URL → fails on every machine that isn't the gateway host. Use a hosted default and let env vars override for self-host.
 - Editing `env_vars` but forgetting the docstring's env-var list → install prompt won't offer the new var, runtime won't wire the auto-`_BASE_URL` suffix.
+- Keeping the inherited 8s `fetch_models` timeout → slow self-hosted endpoints time out and the picker falls back to static `auto/*` models ("can't select models"). Override with a 30s default.
