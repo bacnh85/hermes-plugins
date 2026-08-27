@@ -10,11 +10,12 @@ This plugin lets Hermes treat an OmniRoute instance like any other keyed
 aggregator:
 
   - API key:   read from ``OMNIROUTE_API_KEY`` in ``~/.hermes/.env``.
-  - Base URL:  read from ``OMNIROUTE_BASE_URL`` when set (the runtime
-               auto-wires a trailing ``_BASE_URL`` env var from the
-               profile's ``env_vars``); falls back to the hosted default
-               ``https://omniroute.online/v1``. For a self-hosted OmniRoute
-               instance, set ``OMNIROUTE_BASE_URL=http://localhost:20128/v1``.
+  - Base URL:  read from ``OMNIROUTE_BASE_URL`` in ``~/.hermes/.env``
+               (required). Hermes honours the trailing ``_BASE_URL`` env var
+               automatically via the profile's ``env_vars``.
+               Point it at your instance: e.g.
+               ``OMNIROUTE_BASE_URL=https://omniroute.bacnh.com/v1`` for a
+               remote install or ``http://localhost:20128/v1`` locally.
 
 Install: ``hermes plugins install bacnh85/hermes-plugins/omniroute``.
 
@@ -36,10 +37,11 @@ from providers.base import ProviderProfile
 
 logger = logging.getLogger(__name__)
 
-# Hosted OmniRoute API base (the OpenAI-compatible /v1 surface).
-# Override via OMNIROUTE_BASE_URL in ~/.hermes/.env for self-hosted or remote
-# instances — e.g. http://localhost:20128/v1 for a local install.
-DEFAULT_OMNIROUTE_BASE_URL = "https://omniroute.online/v1"
+# Self-hosted default (the OpenAI-compatible /v1 surface of a local 9router /
+# OmniRoute install). A real deployment always sets OMNIROUTE_BASE_URL in
+# ~/.hermes/.env — remote instances like https://omniroute.bacnh.com/v1 or a
+# local http://localhost:20128/v1.
+DEFAULT_OMNIROUTE_BASE_URL = "http://localhost:20128/v1"
 
 
 class OmniRouteProfile(ProviderProfile):

@@ -36,10 +36,38 @@ The installer prompts for the two env vars below, writes them to
 
 | Variable | Secret? | Default | Notes |
 |---|---|---|---|
-| `OMNIROUTE_API_KEY`  | yes | — | Required. Bearer token from <https://omniroute.online/>. |
-| `OMNIROUTE_BASE_URL` | no  | `https://omniroute.online/v1` | Press Enter for the hosted default. Set `http://localhost:20128/v1` for a local OmniRoute install, or any remote URL. |
+| `OMNIROUTE_API_KEY`  | yes | — | Required. Bearer token of your OmniRoute instance. |
+| `OMNIROUTE_BASE_URL` | no  | `http://localhost:20128/v1` | Self-hosted by design. Set your instance's URL — e.g. `http://localhost:20128/v1` locally or `https://omniroute.bacnh.com/v1` remotely. |
 
 Both live in `~/.hermes/.env`.
+
+## Context windows (the 200K-floor bug)
+
+OmniRoute (9router fork) stamps its registry default pair — context 200000 /
+max output 128000 — onto models whose real window is larger (GLM-5.3 /
+GLM-5.3-flash = 1M, …). Hermes trusts that raw `/models` metadata for
+route-prefixed ids (`glm-cn/glm-5.3`, …) and silently caps the session at
+200K.
+
+Fix without touching Hermes core: sync Hermes' supported
+`model_overrides.omniroute.<model>.context_window` section from the live
+catalog:
+
+```bash
+# preview what would change
+~/.hermes/hermes-agent/venv/bin/python \
+  ~/.hermes/plugins/model-providers/omniroute/scripts/sync_context_overrides.py --dry-run
+
+# write model_overrides into config.yaml
+.../sync_context_overrides.py
+```
+
+The tool derives each family's true window from the catalog itself (the max
+any route/suffix reports — one honest upstream copy exposes it), overrides
+only floor-poisoned ids, preserves entries you wrote by hand, and tracks its
+own writes in `~/.hermes/omniroute_context_overrides.json`. Bare model ids
+(`glm-5.3`, `deepseek-v4-flash`) need nothing: Hermes' built-in family table
+already carries verified windows. Re-run when the catalog grows.
 
 ## Use
 
@@ -79,3 +107,5 @@ The pip entry-point path still works (advanced; for venv-bound setups):
 
 - `__init__.py` — `OmniRouteProfile(ProviderProfile)` + `register_provider(...)` + no-op `register(ctx)`
 - `plugin.yaml` — manifest (`kind: model-provider`, `requires_env`; v1 to stay install-compatible)
+- `scripts/sync_context_overrides.py` — seeds `model_overrides.omniroute.*.context_window`
+  from the live catalog (see "Context windows" above)

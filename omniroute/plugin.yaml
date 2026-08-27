@@ -1,6 +1,6 @@
 name: omniroute
 kind: model-provider
-version: 1.1.0
+version: 1.2.0
 description: OmniRoute — free OpenAI-compatible multi-provider AI gateway
 author: bacnh85
 license: MIT
@@ -12,6 +12,6 @@ requires_env:
     url: "https://omniroute.online/"
     secret: true
   - name: OMNIROUTE_BASE_URL
-    description: "Base URL (Enter for hosted default https://omniroute.online/v1; self-host: http://localhost:20128/v1)"
-    url: "https://omniroute.online/"
+    description: "Base URL of your OmniRoute instance (e.g. http://localhost:20128/v1 or https://omniroute.bacnh.com/v1)"
+    url: "https://github.com/bacnh85/hermes-plugins/tree/main/omniroute"
     secret: false
