@@ -12,13 +12,14 @@ an in-process provider, so the classic failure mode
 
 ## Install
 
+The native Hermes CLI is the canonical path:
+
 ```bash
-git clone https://github.com/bacnh85/hermes-plugins
-cd hermes-plugins
-python3 install_plugins.py munin
+hermes plugins install bacnh85/hermes-plugins/munin
+hermes plugins update munin          # later updates
 ```
 
-or manual:
+or manual directory drop (the same location the native CLI uses):
 
 ```bash
 mkdir -p ~/.hermes/plugins
@@ -41,7 +42,8 @@ hermes gateway restart
 | `MUNIN_BASE_URL` | no | Default `https://munin.kalera.dev` |
 | `MUNIN_TIMEOUT` | no | Request timeout seconds (default 30) |
 
-The installer prompts for the first two and writes them to `~/.hermes/.env`.
+The native installer prompts for any missing ones and writes them to
+`~/.hermes/.env`.
 
 ## What you get
 

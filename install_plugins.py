@@ -1,37 +1,42 @@
 #!/usr/bin/env python3
 """Bootstrap installer for the hermes-plugins repo (github.com/bacnh85/hermes-plugins).
 
-Installs one or more plugins from this repo into this machine's Hermes so any
-Hermes surface (CLI, desktop, gateway, LXC/CI, ...) can use them without
-per-machine setup.
+Doctrine (keep it simple):
 
-Cross-platform (Windows / macOS / Linux) and dependency-free (stdlib only).
+  * Most plugins install fine with Hermes' built-in CLI:
+
+        hermes plugins install bacnh85/hermes-plugins/<name>
+
+    That is the canonical path for every `kind: memory` and general plugin
+    (memory discovery scans the general plugins dir, so the native install
+    location is exactly right). Updates: `hermes plugins update <name>`.
+
+  * EXCEPT `kind: model-provider`. The native CLI always installs to
+    `$HERMES_HOME/plugins/<name>/` (general dir), and provider discovery
+    (`providers/__init__.py::_discover_providers`) scans ONLY
+    `$HERMES_HOME/plugins/model-providers/<name>/`. The general PluginManager
+    deliberately does not import `kind: model-provider` modules either (it
+    records the manifest and skips: "handled by providers/ discovery").
+    Net effect: a native-installed provider shows as "enabled" but the model
+    picker finds no models. So THIS installer exists for exactly one job:
+    put model-provider plugins where provider discovery reads, prompt for
+    their `requires_env`, and point `model.provider` at the new provider.
 
 Usage:
-    python install_plugins.py                  # install ALL plugins in the repo
-    python install_plugins.py omniroute        # install just omniroute
-    python install_plugins.py omniroute other  # install several
-    python install_plugins.py --symlink        # symlink instead of copy (dev: live changes)
+    python install_plugins.py                  # handle ALL plugins in the repo
+    python install_plugins.py omniroute        # just omniroute
+    python install_plugins.py omniroute munin  # several
+    python install_plugins.py --symlink        # dev: symlink instead of copy
     python install_plugins.py --no-config      # install only; don't touch config / .env
-    python install_plugins.py --refresh        # overwrite plugin code even if present
+    python install_plugins.py --refresh        # overwrite existing plugin code
 
-Each plugin is routed to the directory its own discovery system reads, based
-on the `kind` in its plugin.yaml:
-
-    kind model-provider -> $HERMES_HOME/plugins/model-providers/<name>
-    kind memory         -> $HERMES_HOME/plugins/<name>  (memory-provider discovery
-                          scans the general plugins dir; activate with
-                          `hermes config set memory.provider <name>`)
-    anything else       -> $HERMES_HOME/plugins/<name>          (general plugin)
-
-For each plugin, it also ensures the env vars declared in `requires_env` are
-present in .env (prompting for missing ones), and if a plugin is a
-model-provider it can point model.provider at it via `hermes config set`.
+Cross-platform (Windows / macOS / Linux), stdlib only.
 """
 
 from __future__ import annotations
 
 import argparse
+import atexit
 import getpass
 import io
 import os
@@ -45,7 +50,12 @@ import urllib.request
 from pathlib import Path
 
 REPO_HTTP = "https://github.com/bacnh85/hermes-plugins.git"
+REPO_SLUG = "bacnh85/hermes-plugins"
 TARBALL = "https://codeload.github.com/bacnh85/hermes-plugins/tar.gz/refs/heads/main"
+
+# Kinds this installer must handle locally. Everything else is delegated to
+# `hermes plugins install bacnh85/hermes-plugins/<name>` (the native CLI).
+LOCAL_KINDS = {"model-provider"}
 
 
 def log(msg: str) -> None:
@@ -177,25 +187,41 @@ def discover_plugins(root: Path) -> list[dict]:
     return plugins
 
 
-def target_rel_dir(kind: str, name: str) -> str:
-    """The plugins/ subdirectory a plugin of `kind` installs into (its own
-    discovery system reads it)."""
-    if kind == "model-provider":
-        return f"model-providers/{name}"
-    # kind: memory — Hermes' user-installed memory-provider discovery scans
-    # $HERMES_HOME/plugins/<name>/ (plugins/memory/__init__.py::
-    # _iter_provider_dirs: bundled plugins/memory/* then the general user
-    # dir, gated on _is_memory_provider_dir). There is NO user-facing
-    # plugins/memory/ scan — installing there makes the provider invisible.
-    return name  # memory + general plugins both live at plugins/<name>
+# --------------------------------------------------------------------------- #
+# Native (delegated) install — the default path
+# --------------------------------------------------------------------------- #
+def native_install(home: Path, meta: dict, *, enable: bool) -> bool:
+    """Install via the built-in CLI: hermes plugins install <slug>/<name>.
+
+    Returns True when the CLI reported success. Never touches .env or config —
+    the native installer already prompts for requires_env, and memory-kind
+    activation is one explicit `hermes config set memory.provider <name>`
+    the user controls.
+    """
+    cmd = cli_prefix(home) + [
+        "plugins", "install", f"{REPO_SLUG}/{meta['slug']}",
+        "--enable" if enable else "--no-enable",
+    ]
+    # Stream output (not captured) so the native prompts for env vars work.
+    log("  > " + " ".join(cmd))
+    try:
+        proc = subprocess.run(cmd, timeout=300)
+    except FileNotFoundError:
+        log("  ERROR: Hermes CLI not found; install the plugin manually:")
+        log(f"         hermes plugins install {REPO_SLUG}/{meta['slug']}")
+        return False
+    if proc.returncode != 0:
+        log(f"  native install of {meta['name']} failed (exit {proc.returncode})")
+        return False
+    log(f"  {meta['name']}: installed via native CLI")
+    return True
 
 
 # --------------------------------------------------------------------------- #
-# Install
+# Local install — model-provider only
 # --------------------------------------------------------------------------- #
 def install_plugin(home: Path, meta: dict, *, refresh: bool, symlink: bool) -> Path:
-    rel = target_rel_dir(meta["kind"], meta["name"])
-    target = home / "plugins" / rel
+    target = home / "plugins" / "model-providers" / meta["name"]
     if target.is_dir() and not refresh and not symlink:
         log(f"  {meta['name']}: already present at {target} (pass --refresh to overwrite)")
         return target
@@ -229,7 +255,7 @@ def install_plugin(home: Path, meta: dict, *, refresh: bool, symlink: bool) -> P
 
 
 # --------------------------------------------------------------------------- #
-# .env wiring
+# .env wiring (model-provider path only)
 # --------------------------------------------------------------------------- #
 def _looks_secret(name: str) -> bool:
     up = name.upper()
@@ -248,13 +274,8 @@ def ensure_env(home: Path, meta: dict) -> None:
     for var in meta["requires_env"]:
         if var in have:
             continue
-        label = f"  {var} for '{meta['name']}'"
-        if _looks_secret(var):
-            label += ": "
-            prompt = lambda: getpass.getpass(label)  # noqa: E731
-        else:
-            label += ": "
-            prompt = lambda: input(label)  # noqa: E731
+        label = f"  {var} for '{meta['name']}': "
+        prompt = (lambda: getpass.getpass(label)) if _looks_secret(var) else (lambda: input(label))  # noqa: E731
         try:
             val = prompt().strip()
         except (EOFError, KeyboardInterrupt):
@@ -274,11 +295,17 @@ def ensure_env(home: Path, meta: dict) -> None:
 
 # --------------------------------------------------------------------------- #
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Install plugins from hermes-plugins into Hermes")
-    ap.add_argument("names", nargs="*", help="Which plugins to install (default: all)")
-    ap.add_argument("--symlink", action="store_true", help="symlink instead of copy (dev: live changes)")
-    ap.add_argument("--refresh", action="store_true", help="overwrite plugin code even if present")
-    ap.add_argument("--no-config", dest="do_config", action="store_false", help="install only; do not touch config")
+    ap = argparse.ArgumentParser(
+        description="Install plugins from hermes-plugins: model-providers locally, "
+                    "everything else via `hermes plugins install`",
+    )
+    ap.add_argument("names", nargs="*", help="Which plugins to handle (default: all)")
+    ap.add_argument("--symlink", action="store_true", help="model-providers: symlink instead of copy (dev)")
+    ap.add_argument("--refresh", action="store_true", help="model-providers: overwrite existing install")
+    ap.add_argument("--no-enable", action="store_true",
+                    help="native installs: install disabled (default is --enable)")
+    ap.add_argument("--no-config", dest="do_config", action="store_false",
+                    help="model-providers: install only; do not touch config / .env")
     ap.set_defaults(do_config=True)
     args = ap.parse_args()
 
@@ -287,18 +314,21 @@ def main() -> None:
     log(f"  hermes home: {home}")
     log(f"  venv python: {find_venv_python(home) or '(falling back to `hermes` command)'}")
 
-    # Source: local checkout if present, else fetch from GitHub.
+    # Source: local checkout if present, else fetch from GitHub (only needed
+    # for model-providers — native installs fetch the repo themselves).
     local = local_repo_root()
     if local:
         log(f"  source: local checkout {local}")
-        repo_root = local
+        repo_root: Path | None = local
     else:
         log("  source: fetching from GitHub")
         tmp = Path(tempfile.mkdtemp(prefix="hermes-plugins-src-"))
-        try:
-            repo_root = fetch_repo_root(tmp)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+        # plugin dirs are referenced after this block; clean up at exit
+        atexit.register(shutil.rmtree, tmp, ignore_errors=True)
+        repo_root = fetch_repo_root(tmp)
+
+    if repo_root is None:
+        raise SystemExit("Could not resolve the plugin source.")
 
     all_plugins = discover_plugins(repo_root)
     if not all_plugins:
@@ -308,19 +338,40 @@ def main() -> None:
         selected = [p for p in all_plugins if p["name"] in wanted or p["slug"] in wanted]
         missing = wanted - {p["name"] for p in selected} - {p["slug"] for p in selected}
         if missing:
-            raise SystemExit(f"Unknown plugin(s): {', '.join(sorted(missing))}. Available: {', '.join(p['name'] for p in all_plugins)}")
+            raise SystemExit(
+                f"Unknown plugin(s): {', '.join(sorted(missing))}. "
+                f"Available: {', '.join(p['name'] for p in all_plugins)}"
+            )
     else:
         selected = all_plugins
 
-    log(f"  plugins to install: {', '.join(p['name'] for p in selected)}")
+    failures = 0
     for meta in selected:
-        log(f"\n[{meta['name']}] kind={meta['kind']}")
-        install_plugin(home, meta, refresh=args.refresh, symlink=args.symlink)
-        ensure_env(home, meta)
-        if args.do_config and meta["kind"] == "model-provider":
-            set_cfg = cli_prefix(home) + ["config", "set", "model.provider", meta["name"]]
-            run(set_cfg, check=False)
-    log("\ndone. Restart Hermes (or run `hermes doctor`) to pick up new providers/plugins.")
+        local_kind = meta["kind"] in LOCAL_KINDS
+        log(f"\n[{meta['name']}] kind={meta['kind']} -> "
+            f"{'this installer' if local_kind else 'native `hermes plugins install`'}")
+        if local_kind:
+            install_plugin(home, meta, refresh=args.refresh, symlink=args.symlink)
+            if args.do_config:
+                ensure_env(home, meta)
+                set_cfg = cli_prefix(home) + ["config", "set", "model.provider", meta["name"]]
+                run(set_cfg, check=False)
+        else:
+            if not native_install(home, meta, enable=not args.no_enable):
+                failures += 1
+                continue
+            if meta["kind"] == "memory" and args.do_config:
+                # Activation is a single explicit config key — the native
+                # installer doesn't manage provider config for us.
+                log("  activate with: hermes config set memory.provider " + meta["name"])
+
+    log(
+        "\ndone."
+        + (f" {failures} native install(s) FAILED — see above." if failures else "")
+        + " Restart Hermes (or run `hermes doctor`) to pick up new providers/plugins."
+    )
+    if failures:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

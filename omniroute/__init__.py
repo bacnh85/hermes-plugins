@@ -17,14 +17,21 @@ aggregator:
                ``OMNIROUTE_BASE_URL=https://omniroute.bacnh.com/v1`` for a
                remote install or ``http://localhost:20128/v1`` locally.
 
-Install: ``hermes plugins install bacnh85/hermes-plugins/omniroute``.
+Install: ``python3 install_plugins.py omniroute`` (kind-aware installer,
+routes into ``$HERMES_HOME/plugins/model-providers/omniroute/``).
 
-Discovery: the module calls ``register_provider()`` at import time. Under
-``hermes plugins install`` + ``hermes plugins enable omniroute`` the general
-plugin manager imports the file (plugin manifest ``kind: standalone``) and the
-profile lands in ``providers.registry``. The directory-drop path
-(``$HERMES_HOME/plugins/model-providers/omniroute/``) and the pip entry-point
-path (pyproject ``hermes_agent.plugins`` group) keep working as before.
+Discovery: the module calls ``register_provider()`` at import time.
+Provider discovery (``providers/__init__.py``) scans
+``$HERMES_HOME/plugins/model-providers/<name>/`` — that directory-drop
+path and the pip entry-point path (pyproject ``hermes_agent.plugins``
+group) are the supported installs.
+
+NOTE: ``hermes plugins install bacnh85/hermes-plugins/omniroute`` does
+NOT work for this plugin: it lands in the general plugins dir, which
+provider discovery never scans, and the general PluginManager does not
+import ``kind: model-provider`` modules (they are only recorded for
+introspection). The provider then shows "enabled" in
+``hermes plugins list`` but the model picker finds no models.
 """
 
 from __future__ import annotations

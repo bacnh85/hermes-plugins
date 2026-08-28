@@ -5,7 +5,12 @@ description: Author a Hermes Agent plugin in the bacnh85/hermes-plugins repo (pr
 
 # Author a Hermes plugin in this repo
 
-This repo ships `hermes plugins install`-friendly plugins. The non-obvious part is a **kind rule** that flips the discovery path: use it wrong and the provider silently never registers. Read it once, then everything else is mechanical.
+This repo ships plugins that install cleanly on any Hermes machine. The
+non-obvious part is a **kind rule** that flips the discovery path — and with
+it the install command: memory/general plugins use the native
+`hermes plugins install` CLI; model-providers must go through this repo's
+`install_plugins.py`. Use the wrong pair and the provider silently never
+registers. Read it once, then everything else is mechanical.
 
 ## When this applies
 
@@ -34,13 +39,19 @@ Use **`kind: model-provider`**, not `kind: standalone`. Why:
 
 So the plugin must live at `$HERMES_HOME/plugins/model-providers/<name>/`.
 
-**Install paths that work** (all land in `model-providers/`):
-- `python3 install_plugins.py <name>` from a clone of this repo (kind-aware installer, routes by `kind`)
+**Install paths** (all land in `model-providers/`):
+- `python3 install_plugins.py <name>` from a clone of this repo — routes
+  `kind: model-provider` plugins here, and delegates everything else to the
+  native CLI
 - directory drop: `cp -r <name> ~/.hermes/plugins/model-providers/<name>`
 - dev symlink: `ln -s "$PWD/<name>" ~/.hermes/plugins/model-providers/<name>`
 - pip entry point (`hermes_agent.plugins` group, see `pyproject.toml`)
 
-**`hermes plugins install bacnh85/hermes-plugins/<name>` does NOT work** for provider plugins: it always installs to `~/.hermes/plugins/<name>/` (the general dir) regardless of kind. The CLI prints "✓ Installed / ✓ Enabled" but the provider either never registers (`kind: model-provider`) or registers too late for the picker (`kind: standalone`).
+**`hermes plugins install bacnh85/hermes-plugins/<name>` does NOT work for
+provider plugins**: it always installs to `~/.hermes/plugins/<name>/` (the
+general dir) regardless of kind. The CLI prints "✓ Installed / ✓ Enabled"
+but the provider never registers. It IS the canonical path for every other
+kind (`memory`, general) — those discovery systems read the general dir.
 
 ## Provider profile template
 
@@ -94,9 +105,9 @@ def register(ctx) -> None:
     """No-op for the general-plugin loader contract.
 
     Provider registration is the module-level register_provider(profile)
-    above. This stub keeps hermes plugins list clean when installed via
-    hermes plugins install (lands in the general plugins dir, where the
-    loader expects register(ctx)).
+    above. This stub only matters if the directory ever gets imported by
+    the general loader (e.g. a stray copy in the general plugins dir) —
+    the supported install is model-providers/ via install_plugins.py.
     """
     return None
 ```
@@ -135,27 +146,31 @@ requires_env:
 
 1. Create `<name>/` with `__init__.py` (template above), `plugin.yaml`, `README.md`.
 2. Add to `pyproject.toml` entry points: `[project.entry-points."hermes_agent.plugins"]` line + (optional) `[project.entry-points."hermes_agent.plugin_capabilities"]` line.
-3. Add a row to root `README.md`'s plugin table with the `install_plugins.py <name>` command.
+3. Add a row to root `README.md`'s plugin table with the correct install
+   command (native CLI for memory/general, `install_plugins.py <name>` for
+   model-providers).
 4. Add verify snippet to the plugin's README.
 5. Bump `version`.
 6. Run the verification below from the Hermes venv.
 
 ## Multi-plugin install
 
-For a repo that ships multiple top-level plugin dirs (e.g. `omniroute/`,
-`other/`), install each with the kind-aware installer from a clone:
+One command handles every plugin in the repo — the installer routes each by
+its `kind`:
 
 ```bash
 git clone https://github.com/bacnh85/hermes-plugins
 cd hermes-plugins
-python3 install_plugins.py omniroute
-python3 install_plugins.py other-plugin
+python3 install_plugins.py            # all plugins
+python3 install_plugins.py munin      # or just some
 ```
 
-The installer routes each plugin by its `kind` into the directory its
-discovery system reads. **Do not use `hermes plugins install` for provider
-plugins** — it always installs to the general `plugins/<name>/` dir, which
-model-provider discovery never scans (see the kind rule).
+Under the hood: `model-provider` → local install into
+`plugins/model-providers/`; everything else → delegates to
+`hermes plugins install bacnh85/hermes-plugins/<name>`. Do not run
+`hermes plugins install` directly for provider plugins — it always installs
+to the general `plugins/<name>/` dir, which model-provider discovery never
+scans (see the kind rule).
 
 ## Verification (from `~/.hermes/hermes-agent/` venv)
 
@@ -187,7 +202,7 @@ hermes model                                 # <PluginName> appears in picker WI
 
 ## Footgun recap
 
-- `hermes plugins install .../<plugin>` installs into the general dir — provider never becomes selectable in the picker. Install into `plugins/model-providers/` (install_plugins.py / drop / symlink).
+- `hermes plugins install .../<provider-plugin>` installs into the general dir — provider never becomes selectable in the picker. Provider plugins go through `install_plugins.py` / drop / symlink into `plugins/model-providers/`. (Memory/general plugins: the native CLI is correct.)
 - Forgetting `def register(ctx)` → "no register() function" warning + error field in `hermes plugins list`. Add the no-op.
 - Hardcoding `http://localhost:...` as the default base URL → fails on every machine that isn't the gateway host. Use a hosted default and let env vars override for self-host.
 - Editing `env_vars` but forgetting the docstring's env-var list → install prompt won't offer the new var, runtime won't wire the auto-`_BASE_URL` suffix.
