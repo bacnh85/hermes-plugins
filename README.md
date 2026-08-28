@@ -17,6 +17,7 @@ Each plugin lives in its own directory with its own `plugin.yaml` manifest.
 | Plugin | Install | Kind | What it does |
 |---|---|---|---|
 | [`omniroute/`](./omniroute) | `python3 install_plugins.py omniroute` (from a clone) | model-provider | Add OmniRoute as a Hermes `model.provider` (OpenAI-compatible routing gateway). |
+| [`munin/`](./munin) | `python3 install_plugins.py munin` (from a clone) | memory | Munin Context Core as a Hermes `memory.provider` — long-term memory w/ E2EE + GraphRAG. Pure-stdlib REST (no Node/MCP subprocess). |
 
 ---
 
@@ -59,7 +60,9 @@ its discovery system scans:
 
 - `kind: model-provider` → `~/.hermes/plugins/model-providers/<name>/`
   (provider discovery in `providers/__init__.py::_discover_providers()`)
-- `kind: memory` → `~/.hermes/plugins/memory/<name>/`
+- `kind: memory` → `~/.hermes/plugins/<name>/` (the general plugins dir —
+  Hermes' memory-provider loader scans it; activate with
+  `hermes config set memory.provider <name>`)
 - anything else → `~/.hermes/plugins/<name>/` (general `PluginManager`)
 
 The `$HERMES_HOME/plugins/model-providers/<name>/` drop-in path is the

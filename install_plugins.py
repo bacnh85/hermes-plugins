@@ -19,7 +19,9 @@ Each plugin is routed to the directory its own discovery system reads, based
 on the `kind` in its plugin.yaml:
 
     kind model-provider -> $HERMES_HOME/plugins/model-providers/<name>
-    kind memory         -> $HERMES_HOME/plugins/memory/<name>
+    kind memory         -> $HERMES_HOME/plugins/<name>  (memory-provider discovery
+                          scans the general plugins dir; activate with
+                          `hermes config set memory.provider <name>`)
     anything else       -> $HERMES_HOME/plugins/<name>          (general plugin)
 
 For each plugin, it also ensures the env vars declared in `requires_env` are
@@ -180,9 +182,12 @@ def target_rel_dir(kind: str, name: str) -> str:
     discovery system reads it)."""
     if kind == "model-provider":
         return f"model-providers/{name}"
-    if kind == "memory":
-        return f"memory/{name}"
-    return name  # general plugins live at plugins/<name>
+    # kind: memory — Hermes' user-installed memory-provider discovery scans
+    # $HERMES_HOME/plugins/<name>/ (plugins/memory/__init__.py::
+    # _iter_provider_dirs: bundled plugins/memory/* then the general user
+    # dir, gated on _is_memory_provider_dir). There is NO user-facing
+    # plugins/memory/ scan — installing there makes the provider invisible.
+    return name  # memory + general plugins both live at plugins/<name>
 
 
 # --------------------------------------------------------------------------- #
