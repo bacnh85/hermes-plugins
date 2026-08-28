@@ -1,0 +1,26 @@
+name: munin
+kind: memory
+version: 1.0.0
+description: "Munin Context Core — long-term memory with E2EE + GraphRAG. Pure-stdlib REST client, no Node/MCP subprocess."
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/munin
+tags: [memory, provider, munin, e2ee, graphrag, long-term]
+requires_env:
+  - name: MUNIN_API_KEY
+    description: "Munin Context Core API key"
+    url: "https://munin.kalera.dev"
+    secret: true
+  - name: MUNIN_PROJECT
+    description: "Active Munin project id (e.g. proj_hermes-mac-mini-m4)"
+    url: "https://munin.kalera.dev"
+    secret: false
+  - name: MUNIN_BASE_URL
+    description: "API base URL (default https://munin.kalera.dev)"
+    url: ""
+    secret: false
+  - name: MUNIN_TIMEOUT
+    description: "Request timeout in seconds (default 30)"
+    url: ""
+    secret: false
+hooks: []
