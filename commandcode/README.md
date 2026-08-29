@@ -59,12 +59,22 @@ pi-sub use — no separate subscription auth needed.
 ## Use
 
 ```bash
-hermes model                                    # pick Command Code + model (live /models fetch)
-hermes config set model.provider commandcode
+hermes model                                    # interactive picker: pick the Command Code provider, then model
+hermes config set model.provider commandcode    # make it the default provider
 hermes config set model.model deepseek/deepseek-v4-flash
 ```
 
-Or per-session: `/model commandcode/<model-id>`.
+Or one-shot from the terminal (real end-to-end check incl. tool calling):
+
+```bash
+hermes --provider commandcode --model minimax/minimax-m2.7-free -z "hello"
+```
+
+> Note: in-session `/model <arg>` switches model *within the current
+> provider* — it does not change provider. Use the interactive `/model`
+> picker (arrow keys → provider) or the config/CLI forms above. Beware
+> fuzzy matches: OmniRoute proxies a `command-code/…` namespace, so a
+> typo'd `commandcode/…` can silently land on OmniRoute's copy instead.
 
 ### Usage (5h / weekly / monthly)
 
