@@ -151,14 +151,20 @@ def slash_commandcode(raw_args: str) -> str:
     return _build_report(force=(sub == "refresh"))
 
 
-def register_cli_commandcode(subparsers) -> None:
-    """argparse setup for ``hermes commandcode-usage``."""
-    parser = subparsers.add_parser(
-        "commandcode-usage",
-        help="Show Command Code 5-hour/weekly usage windows and monthly credits",
-    )
+def _cli_handler(args) -> None:
+    """Dispatch for ``hermes commandcode-usage`` (wired via set_defaults)."""
+    print(_build_report(force=getattr(args, "refresh", False)))
+
+
+def register_cli_commandcode(parser) -> None:
+    """argparse setup for ``hermes commandcode-usage``.
+
+    NOTE: Hermes' CLI wiring (hermes_cli/main.py) creates the subparser for
+    us and calls ``setup_fn(plugin_parser)`` — setup_fn receives the command
+    parser itself, NOT the top-level subparsers object. handler_fn is wired
+    separately via set_defaults(func=...).
+    """
     parser.add_argument("--refresh", action="store_true", help="skip the 60s result cache")
-    parser.set_defaults(func=lambda args: print(_build_report(force=args.refresh)))
 
 
 def register(ctx) -> None:
@@ -173,5 +179,6 @@ def register(ctx) -> None:
         "commandcode-usage",
         help="Show Command Code usage windows and monthly credits",
         setup_fn=register_cli_commandcode,
+        handler_fn=_cli_handler,
         description="Command Code subscription usage",
     )
