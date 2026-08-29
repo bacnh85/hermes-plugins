@@ -35,12 +35,38 @@ from __future__ import annotations
 import logging
 import os
 
+import providers as _providers_registry
 from providers import register_provider
 from providers.base import ProviderProfile
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_COMMANDCODE_BASE_URL = "https://api.commandcode.ai/provider/v1"
+
+
+def _disable_bundled_anthropic_variant() -> None:
+    """Drop the bundled ``commandcode-anthropic`` duplicate from the registry.
+
+    Upstream hermes-agent ships ``plugins/model-providers/commandcode/``
+    (the earlier direct-patch approach) which registers TWO profiles:
+    ``commandcode`` and ``commandcode-anthropic`` (Anthropic Messages
+    mode). This user plugin supersedes the bundled pair with one
+    maintained provider, so remove the duplicate so the ``/model`` picker
+    shows a single Command Code entry.
+
+    User plugins import AFTER bundled discovery (last-writer-wins), so by
+    the time this runs the bundled profiles are registered and can be
+    popped. Doing it here (not by deleting the bundled dir) survives
+    ``hermes update`` / the daily auto-update, which would restore any
+    tracked upstream file we deleted.
+    """
+    try:
+        _providers_registry._REGISTRY.pop("commandcode-anthropic", None)
+        for _alias in ("commandcode-claude", "commandcode-anthropic"):
+            _providers_registry._ALIASES.pop(_alias, None)
+        _providers_registry._PROVIDER_LIST_CACHE = None
+    except Exception as exc:  # upstream renamed internals — non-fatal
+        logger.debug("could not disable bundled commandcode-anthropic: %s", exc)
 
 
 class CommandCodeProfile(ProviderProfile):
@@ -98,6 +124,7 @@ commandcode = CommandCodeProfile(
 )
 
 register_provider(commandcode)
+_disable_bundled_anthropic_variant()
 
 
 def register(ctx) -> None:

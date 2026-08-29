@@ -132,6 +132,16 @@ In-session: `/model commandcode/<id>`, then `/commandcode` for usage.
 - `commandcode/plugin.yaml` — manifest (`kind: model-provider`, `requires_env`)
 - `commandcode-usage/` — standalone plugin: `/commandcode` slash command + `hermes commandcode-usage` CLI subcommand
 
+## Entries in the `/model` picker
+
+Upstream hermes-agent bundles its own `plugins/model-providers/commandcode/`
+(the earlier direct-patch approach, PR #88851 class) which registers two
+profiles: `commandcode` and `commandcode-anthropic`. This user plugin loads
+after bundled discovery (last-writer-wins) and pops the bundled
+`commandcode-anthropic` profile from the registry at import time, so the
+picker shows a **single** Command Code entry. Deleting the bundled dir is
+NOT enough — `hermes update` / the daily auto-update would restore it.
+
 ## License
 
 MIT
