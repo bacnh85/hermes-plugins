@@ -1,0 +1,17 @@
+name: commandcode
+kind: model-provider
+version: 1.0.0
+description: "Command Code (commandcode.ai) — OpenAI-compatible Provider API: pay-at-cost access to Claude, GPT-5.x, Gemini, GLM, Kimi, DeepSeek, Qwen and more."
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/commandcode
+tags: [provider, model-provider, commandcode, aggregator, openai-compatible]
+requires_env:
+  - name: COMMANDCODE_API_KEY
+    description: "Command Code Provider API key (Studio → API Keys, user_...)"
+    url: "https://commandcode.ai/studio"
+    secret: true
+  - name: COMMANDCODE_BASE_URL
+    description: "Override the Provider API base URL (default https://api.commandcode.ai/provider/v1; must include /v1)"
+    url: "https://commandcode.ai/docs/provider"
+    secret: false

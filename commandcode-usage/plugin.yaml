@@ -1,0 +1,13 @@
+name: commandcode-usage
+kind: standalone
+version: 1.0.0
+description: "Command Code usage windows: /commandcode slash command + hermes commandcode-usage CLI showing 5-hour/weekly rolling windows and monthly credit balance from /alpha/billing/credits. Companion to the commandcode model-provider plugin."
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/commandcode-usage
+tags: [commandcode, usage, quota, billing, standalone]
+requires_env:
+  - name: COMMANDCODE_API_KEY
+    description: "Command Code Provider API key (Studio → API Keys, user_...)"
+    url: "https://commandcode.ai/studio"
+    secret: true
