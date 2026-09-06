@@ -1,0 +1,17 @@
+name: zai-anthropic
+kind: model-provider
+version: 1.0.0
+description: "Z.AI GLM Coding Plan via the Anthropic Messages API (zai-anthropic) — same surface the ZCode desktop client uses"
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/zai-anthropic
+tags: [provider, model-provider, zai, zcode, glm, anthropic]
+requires_env:
+  - name: ZAI_ANTHROPIC_API_KEY
+    description: "Z.ai Coding Plan API key (works as {apiKeyId}.{apiKeySecret} for ZCode request signing)"
+    url: "https://z.ai/manage-apikey/apikey-list"
+    secret: true
+  - name: ZAI_ANTHROPIC_BASE_URL
+    description: "Anthropic-compatible endpoint override (default https://api.z.ai/api/anthropic; alternatives: https://open.bigmodel.cn/api/anthropic, https://zcode.z.ai/api/v1/ultra-zai/anthropic)"
+    url: "https://github.com/bacnh85/hermes-plugins/tree/main/zai-anthropic"
+    secret: false

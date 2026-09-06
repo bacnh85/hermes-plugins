@@ -1,0 +1,13 @@
+name: zai-anthropic-zcode
+kind: standalone
+version: 1.0.0
+description: "ZCode desktop-client request parity for the zai-anthropic provider: identity headers, Ed25519+PoW request signing (V4), fast mode, 401-bypass — via llm_request middleware. Companion to zai-anthropic."
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/zai-anthropic-zcode
+tags: [zai, zcode, glm, signing, standalone, companion]
+requires_env:
+  - name: ZAI_ANTHROPIC_API_KEY
+    description: "Z.ai Coding Plan API key — signing needs the {apiKeyId}.{apiKeySecret} two-part form"
+    url: "https://z.ai/manage-apikey/apikey-list"
+    secret: true
