@@ -1,0 +1,13 @@
+name: zai-usage
+kind: standalone
+version: 1.0.0
+description: "Z.ai Coding Plan usage: /zai slash command + hermes zai-usage CLI showing the 5h token window (% used, reset time) and 24h/48h per-model token totals. Companion to zai-anthropic / zai-anthropic-zcode."
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/zai-usage
+tags: [zai, glm, usage, quota, standalone, companion]
+requires_env:
+  - name: ZAI_ANTHROPIC_API_KEY
+    description: "Z.ai Coding Plan API key (same key the zai-anthropic provider uses; billing-plane access only)"
+    url: "https://z.ai/manage-apikey/apikey-list"
+    secret: true
