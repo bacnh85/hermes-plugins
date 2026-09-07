@@ -40,7 +40,13 @@ from providers.base import ProviderProfile, _profile_user_agent
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://api.z.ai/api/anthropic"
+DEFAULT_BASE_URL = "https://api.z.ai/api/anthropic/v1"
+# NOTE the /v1 suffix: Hermes' Anthropic client strips a trailing /v1 before
+# building the Messages URL, while hermes_cli.models.probe_api_models (used by
+# the `hermes model` setup flow) does NOT — it probes {base}/models first, and
+# api.z.ai answers that path with HTTP 200 and an EMPTY list (the real catalog
+# lives at /v1/models). With /v1 in the base the probe hits /v1/models directly
+# and the picker lists all 10 models (verified 2026-09-07).
 
 _ENV = ("ZAI_ANTHROPIC_API_KEY", "ZAI_ANTHROPIC_BASE_URL")
 
@@ -62,11 +68,30 @@ FALLBACK_MODELS = (
 
 
 def _resolved_base_url() -> str:
+    """Env override, else the /v1-suffixed default (see DEFAULT_BASE_URL).
+
+    A user-set ZAI_ANTHROPIC_BASE_URL without /v1 still works everywhere:
+    the profile's own fetch_models and the runtime client handle it; only the
+    setup-flow's raw probe prefers the /v1 form.
+    """
     raw = (os.getenv("ZAI_ANTHROPIC_BASE_URL") or "").strip()
     return raw.rstrip("/") if raw else DEFAULT_BASE_URL
 
 
-def _fetch_models(timeout: float = 30.0, base_url: str | None = None) -> list[str] | None:
+def _models_endpoint(base_url: str | None) -> str:
+    """Catalog URL for any base form: {base}/v1/models, {base}/models for a
+    base already ending in /v1."""
+    base = (base_url or "").strip().rstrip("/") or _resolved_base_url()
+    if base.endswith("/v1"):
+        return f"{base}/models"
+    return f"{base}/v1/models"
+
+
+def _fetch_models(
+    timeout: float = 30.0,
+    base_url: str | None = None,
+    api_key: str | None = None,
+) -> list[str] | None:
     """Fetch the live catalog from ``{base}/v1/models`` (x-api-key auth).
 
     The Anthropic-style models endpoint is NOT OpenAI-shaped: it answers
@@ -75,9 +100,8 @@ def _fetch_models(timeout: float = 30.0, base_url: str | None = None) -> list[st
     (``x-api-key``, not Bearer) and the 30s timeout matters for cold
     CDN-fronted endpoints — hence the override.
     """
-    effective = (base_url or "").strip().rstrip("/") or _resolved_base_url()
-    url = f"{effective}/v1/models"
-    api_key = (os.getenv("ZAI_ANTHROPIC_API_KEY") or "").strip()
+    url = _models_endpoint(base_url)
+    api_key = (api_key or os.getenv("ZAI_ANTHROPIC_API_KEY") or "").strip()
     try:
         req = urllib.request.Request(url)
         if api_key:
@@ -97,8 +121,14 @@ def _fetch_models(timeout: float = 30.0, base_url: str | None = None) -> list[st
 class ZaiAnthropicProfile(ProviderProfile):
     """Z.AI Coding Plan — GLM via the Anthropic Messages surface."""
 
-    def fetch_models(self, *, api_key=None, base_url=None, timeout=30.0):
-        return _fetch_models(timeout=timeout, base_url=base_url)
+    def fetch_models(
+        self,
+        *,
+        api_key=None,
+        base_url=None,
+        timeout=30.0,
+    ):
+        return _fetch_models(timeout=timeout, base_url=base_url, api_key=api_key)
 
 
 zai_anthropic = ZaiAnthropicProfile(
@@ -110,6 +140,7 @@ zai_anthropic = ZaiAnthropicProfile(
     description="Z.AI GLM Coding Plan (Anthropic Messages — the ZCode surface; use ZAI_ANTHROPIC_API_KEY)",
     signup_url="https://z.ai/",
     base_url=DEFAULT_BASE_URL,
+    models_url=f"{DEFAULT_BASE_URL}/models",  # real catalog: /api/anthropic/v1/models
     fallback_models=FALLBACK_MODELS,
     default_aux_model="glm-5.3-flash",
     supports_vision=True,  # glm-5.3-flash is vision-capable
