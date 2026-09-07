@@ -46,6 +46,8 @@ import urllib.request
 import uuid
 from typing import Any
 
+from hermes_cli.urllib_security import open_credentialed_url
+
 logger = logging.getLogger(__name__)
 
 PROVIDER_ID = "zai-anthropic"
@@ -59,6 +61,13 @@ HANDSHAKE_PATH = "/api/paas/c1f3a7e2/v2/client"
 APP_ID = "zcode"
 APP_VERSION_FALLBACK = "3.10.2"  # matches the ZCode desktop app
 FAST_MODE_BETA = "fast-mode-2026-02-01"
+# Betas Hermes' Anthropic client sets client-level (agent/anthropic_adapter
+# _COMMON_BETAS). Per-request extra_headers REPLACE the client header, so any
+# anthropic-beta we emit must carry these too (review MAJOR-2).
+COMMON_CLIENT_BETAS = (
+    "interleaved-thinking-2025-05-14",
+    "fine-grained-tool-streaming-2025-05-14",
+)
 
 GATE_TTL_S = 3_600.0
 GATE_FAILURE_COOLDOWN_S = 60.0
@@ -103,12 +112,12 @@ _noted: set[str] = set()
 
 def signing_enabled() -> bool:
     """ZCode signing ON by default; opt out with ZAI_ANTHROPIC_SIGNING=0."""
-    return not re.match(r"^(0|false|no|off)$", os.getenv("ZAI_ANTHROPIC_SIGNING", ""), re.I)
+    return not re.match(r"^(0|false|no|off)$", (os.getenv("ZAI_ANTHROPIC_SIGNING") or "").strip(), re.I)
 
 
 def fast_mode_enabled() -> bool:
     """Fast mode ON by default (ZCode parity); ZAI_ANTHROPIC_SPEED=standard disables."""
-    return not re.match(r"^(standard|normal|slow)$", os.getenv("ZAI_ANTHROPIC_SPEED", ""), re.I)
+    return not re.match(r"^(standard|normal|slow)$", (os.getenv("ZAI_ANTHROPIC_SPEED") or "").strip(), re.I)
 
 
 def resolved_base_url() -> str:
@@ -126,7 +135,9 @@ def _printable(raw: str | None) -> str | None:
 
 
 def _os_category(p: str) -> str:
-    return {"darwin": "macos", "win32": "windows"}.get(p, "linux")
+    # platform.system().lower() is "windows" on Windows; "win32" kept for
+    # parity with the TS original (review MINOR-7).
+    return {"darwin": "macos", "win32": "windows", "windows": "windows"}.get(p, "linux")
 
 
 def resolve_device_mid() -> str:
@@ -283,7 +294,9 @@ def _fetch_gate(identity: dict[str, Any], credential: str) -> str:
     headers.pop("X-Device-Mid", None)
     headers["x-api-key"] = credential
     req = urllib.request.Request(f"{DEFAULT_ORIGIN}{GATE_PATH}", headers=headers)
-    with urllib.request.urlopen(req, timeout=GATE_TIMEOUT_S) as resp:
+    # open_credentialed_url strips auth headers on cross-origin redirects
+    # (review MAJOR-1) — the gate carries the full credential in x-api-key.
+    with open_credentialed_url(req, timeout=GATE_TIMEOUT_S) as resp:
         parsed = json.loads(resp.read().decode())
     if not parsed or parsed.get("code") != 0:
         return "unavailable"
@@ -307,7 +320,9 @@ def _perform_handshake(key_id: str, secret: str) -> Any:
         method="POST",
         headers={"Authorization": f"{key_id}.{secret}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=HANDSHAKE_TIMEOUT_S) as resp:
+    # open_credentialed_url strips auth headers on cross-origin redirects
+    # (review MAJOR-1) — the handshake carries keyId.secret in Authorization.
+    with open_credentialed_url(req, timeout=HANDSHAKE_TIMEOUT_S) as resp:
         envelope = json.loads(resp.read().decode())
     code = envelope.get("code")
     if code == 500:
@@ -387,7 +402,13 @@ def sign_request_headers(
 ) -> bool:
     """Add V4 signing headers into ``headers`` in place. Returns True only when
     the request was actually signed. Never raises; every ineligible path leaves
-    the headers untouched (fail-open, matching the ZCode client)."""
+    the headers untouched (fail-open, matching the ZCode client).
+
+    Note (review MINOR-9): the gate probe + handshake run inside the lock, so
+    the first request of a TTL window can hold the lock up to ~25s
+    (15s gate + 10s handshake timeouts). Cooldowns bound recurrence; callers
+    accept this by design — subsequent requests within the TTL are lock-fast.
+    """
     global _last_signed_key
 
     if not credential:
@@ -403,8 +424,11 @@ def sign_request_headers(
     if origin not in ZAI_ORIGINS:
         _note_once(f"origin:{origin}", f"base URL {origin} is not a z.ai origin — signing skipped (credential egress guard)")
         return False
+    # Paths the client never signs: check both the bare base path and the
+    # messages endpoint form (review MINOR-6 — the old code compared only the
+    # base path, so "/api/v1/zcode-plan/anthropic" never matched).
     path = urlparse(base_url).path.rstrip("/")
-    if path in UNSIGNED_PATHS:
+    if path in UNSIGNED_PATHS or f"{path}/v1/messages" in UNSIGNED_PATHS:
         return False
 
     state_key = f"{origin}\n{credential}"
@@ -502,7 +526,14 @@ def _resolve_credential() -> str:
 
 
 def _apply_fast_mode(request: dict[str, Any]) -> bool:
-    """Top-level ``speed`` body field + fast-mode beta header (ZCode parity)."""
+    """Top-level ``speed`` body field + fast-mode beta header (ZCode parity).
+
+    The beta header must UNION with the betas Hermes' client already sends
+    (interleaved-thinking, fine-grained-tool-streaming — see
+    agent/anthropic_adapter.py _COMMON_BETAS): per-request extra_headers
+    REPLACE the client-level anthropic-beta, so a bare fast-mode value would
+    silently drop them (review MAJOR-2).
+    """
     extra_body = request.get("extra_body")
     if not isinstance(extra_body, dict):
         extra_body = {}
@@ -512,31 +543,50 @@ def _apply_fast_mode(request: dict[str, Any]) -> bool:
     extra_headers = request.get("extra_headers")
     if not isinstance(extra_headers, dict):
         extra_headers = {}
-    existing = extra_headers.get("anthropic-beta")
-    extra_headers["anthropic-beta"] = (
-        f"{existing},{FAST_MODE_BETA}" if existing else FAST_MODE_BETA
-    )
+    existing = extra_headers.get("anthropic-beta") or ""
+    parts = [p.strip() for p in existing.split(",") if p.strip()]
+    for beta in COMMON_CLIENT_BETAS:
+        if beta not in parts:
+            parts.append(beta)
+    if FAST_MODE_BETA not in parts:
+        parts.append(FAST_MODE_BETA)
+    extra_headers["anthropic-beta"] = ",".join(parts)
     request["extra_headers"] = extra_headers
     return True
 
 
 def _apply_signing(request: dict[str, Any], context: dict[str, Any]) -> bool:
+    """Identity headers + V4 signing for zai-anthropic requests.
+
+    Egress guard (review MAJOR-4): evaluate against the REQUEST's actual
+    destination — Hermes passes it as context["base_url"] — falling back to
+    the env/default only when the context lacks it. The old code checked the
+    env-resolved base, which diverges when the user points model.base_url at
+    a proxy/bigmodel while the env var still names api.z.ai.
+    """
     extra_headers = request.get("extra_headers")
     if not isinstance(extra_headers, dict):
         extra_headers = {}
         request["extra_headers"] = extra_headers
     if any(k.lower() == "x-client-sig" for k in extra_headers):
         return False  # already signed upstream
+    destination = (context.get("base_url") or "").strip() or resolved_base_url()
+    from urllib.parse import urlparse
+
+    origin = f"{urlparse(destination).scheme}://{urlparse(destination).netloc}"
+    if origin not in ZAI_ORIGINS:
+        # Review MINOR-10: the ZCode identity fingerprint is also
+        # origin-gated — never sent to non-z.ai destinations.
+        return False
     session_id = str(context.get("session_id") or "") or None
     credential = _resolve_credential()
-    headers = build_identity_headers(resolve_identity())
-    extra_headers.update(headers)  # identity headers ride along on every request
+    extra_headers.update(build_identity_headers(resolve_identity()))
     request["extra_headers"] = extra_headers
     if not credential:
         return False
     return sign_request_headers(
         extra_headers,
-        base_url=resolved_base_url(),
+        base_url=destination,
         session_id=session_id,
         credential=credential,
     )
@@ -579,6 +629,23 @@ def on_api_request_error(**context: Any) -> None:
         logger.debug("zai-anthropic-zcode error hook skipped: %s", exc)
 
 
+def on_post_api_request(**context: Any) -> None:
+    """Successful request → reset the consecutive-401 counter (review MAJOR-3).
+
+    api_request_error only fires on FAILURES, so without this hook the
+    'consecutive' 401 counter never observed successes and two unrelated 401s
+    months apart on a long-lived gateway would permanently bypass signing.
+    post_api_request fires on every successful call (provider-gated here).
+    """
+    try:
+        if (context.get("provider") or "").lower() != PROVIDER_ID:
+            return
+        note_response_ok()
+    except Exception as exc:
+        logger.debug("zai-anthropic-zcode post hook skipped: %s", exc)
+
+
 def register(ctx) -> None:
     ctx.register_middleware("llm_request", llm_request_middleware)
     ctx.register_hook("api_request_error", on_api_request_error)
+    ctx.register_hook("post_api_request", on_post_api_request)

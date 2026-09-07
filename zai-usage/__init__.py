@@ -38,6 +38,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from hermes_cli.urllib_security import open_credentialed_url
+
 QUOTA_PATH = "/api/monitor/usage/quota/limit"
 MODEL_USAGE_PATH = "/api/monitor/usage/model-usage"
 REQUEST_TIMEOUT_S = 15
@@ -65,7 +67,9 @@ def _get(path: str, qs: str = "") -> dict[str, Any]:
             "User-Agent": USER_AGENT,
         },
     )
-    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_S) as resp:
+    # open_credentialed_url strips the Bearer header on cross-origin
+    # redirects (review MAJOR-1).
+    with open_credentialed_url(req, timeout=REQUEST_TIMEOUT_S) as resp:
         data = json.loads(resp.read().decode())
     if data.get("success") is False or (data.get("code") not in (0, 200, None)):
         raise RuntimeError(f"api error {data.get('code')}: {data.get('msg')}")
@@ -150,7 +154,11 @@ def _build_report(force: bool = False) -> str:
         _cached["at"] = now
         _cached["report"] = report
         return report
-    # Partial/total failure: fall back to the last good report if we have one.
+    # Partial failure (review NIT-11): render whatever arrived fresh, and
+    # only fall back to the stale cache when NOTHING succeeded.
+    partial = _render(quota, usage24, usage48)
+    if partial:
+        return partial + "\n(partial — " + "; ".join(errors) + ")"
     if _cached["report"]:
         return _cached["report"] + "\n(stale — last successful fetch)"
     return (
@@ -163,7 +171,9 @@ def _render(quota: dict[str, Any], usage24: dict[str, Any], usage48: dict[str, A
     lines: list[str] = []
     for w in quota.get("windows", []):
         reset = f", resets {w['reset']}" if w.get("reset") else ""
-        lines.append(f"5h window: {w.get('pct', '?')}% used{reset}")
+        pct = w.get("pct")
+        # present-but-None would render "None%" without the explicit check
+        lines.append(f"5h window: {pct if pct is not None else '?'}% used{reset}")
     if not quota.get("windows"):
         lines.append("5h window: no TOKENS_LIMIT data")
     by24 = usage24.get("by_model", {})
@@ -181,9 +191,25 @@ def _render(quota: dict[str, Any], usage24: dict[str, Any], usage48: dict[str, A
 
 
 def slash_zai(args: str = "") -> str:
-    """In-session /zai handler — returns the report as a string."""
+    """In-session /zai handler — returns the report as a string.
+
+    The gateway calls slash handlers synchronously inside its async event
+    loop (review MAJOR-5); three sequential 15s-timeout fetches could freeze
+    the whole gateway for up to ~45s. Run the blocking I/O on a worker thread
+    whenever a loop is already running (gateway); plain thread contexts
+    (CLI/`hermes zai-usage`) call it directly.
+    """
     try:
-        return _build_report(force=(args or "").strip().lower() in {"refresh", "-r", "--refresh"})
+        import asyncio
+        import concurrent.futures
+
+        force = (args or "").strip().lower() in {"refresh", "-r", "--refresh"}
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return _build_report(force=force)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(_build_report, force=force).result(timeout=60)
     except Exception as exc:  # never raise into the session
         return f"zai-usage: {exc}"
 

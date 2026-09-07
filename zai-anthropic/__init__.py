@@ -35,6 +35,8 @@ import logging
 import os
 import urllib.request
 
+from hermes_cli.urllib_security import open_credentialed_url
+
 from providers import register_provider
 from providers.base import ProviderProfile, _profile_user_agent
 
@@ -109,7 +111,7 @@ def _fetch_models(
         req.add_header("Accept", "application/json")
         req.add_header("anthropic-version", "2023-06-01")
         req.add_header("User-Agent", _profile_user_agent())
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with open_credentialed_url(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode())
         items = data.get("data", []) if isinstance(data, dict) else data
         return [m["id"] for m in items if isinstance(m, dict) and "id" in m]
