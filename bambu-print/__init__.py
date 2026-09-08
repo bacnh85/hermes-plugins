@@ -126,10 +126,13 @@ def _t_print(args: dict[str, Any]) -> str:
     p = _resolve_printer()
     sd = (args or {}).get("sd_path") or ""
     name = (args or {}).get("name") or ""
+    use_ams = (args or {}).get("use_ams", True)
+    ams_slot = int((args or {}).get("ams_slot") or 0)
     if not sd:
         return "print needs sd_path=<1:/file.gcode.3mf> (from upload)"
     res = _blocking(
-        B.start, p["host"], p["serial"], p["access_code"], sd, subtask_name=name
+        B.start, p["host"], p["serial"], p["access_code"], sd,
+        subtask_name=name, use_ams=use_ams, ams_slot=ams_slot,
     )
     if res.get("started"):
         return f"Print started (stage {res.get('stage')}, {res.get('progress_pct')}%)."
@@ -141,6 +144,27 @@ def _t_stop(args: dict[str, Any]) -> str:
     with B.BambuMQTT(p["host"], p["serial"], p["access_code"]) as prn:
         prn.stop()
     return "Stop command sent."
+
+
+def _t_filament(args: dict[str, Any]) -> str:
+    p = _resolve_printer()
+    with B.BambuMQTT(p["host"], p["serial"], p["access_code"]) as prn:
+        fs = prn.filament_status()
+    lines = ["Filament sources:"]
+    if fs["ams"]:
+        for t in fs["ams"]:
+            color = t["color"][:6] if t["color"] else ""
+            lines.append(
+                f"  AMS slot {t['slot']}: {t['type']} {t['name'] or ''} "
+                f"(#{color}) remain {t['remain_pct']}%"
+            )
+    else:
+        lines.append("  AMS: no loaded trays")
+    sp = fs["spool"]
+    lines.append(
+        f"  External spool: {'present ' + str(sp.get('type')) if sp.get('present') else 'EMPTY — use AMS!'}"
+    )
+    return "\n".join(lines)
 
 
 def _t_light(args: dict[str, Any]) -> str:
@@ -194,17 +218,25 @@ def _tools() -> list[dict[str, Any]]:
         ),
         tool(
             "bambu_print",
-            "Start a print job on a Bambu printer (LAN mode, MQTT project_file). sd_path is the 1:/... value returned by bambu_upload. The A1 Mini may show a confirm dialog on its screen first.",
+            "Start a print job on a Bambu printer (LAN mode, MQTT project_file). sd_path is the 1:/... value returned by bambu_upload. The A1 Mini may show a confirm dialog on its screen first. use_ams defaults true (feeds AMS); check bambu_filament first — an empty external spool 'prints' without extruding anything.",
             {
                 "type": "object",
                 "properties": {
                     "sd_path": {**str_opt, "description": "SD path e.g. 1:/plate_1.gcode.3mf"},
                     "name": {**str_opt, "description": "Optional human job name"},
+                    "use_ams": {"type": "boolean", "description": "Feed from AMS (default true)"},
+                    "ams_slot": {"type": "integer", "description": "AMS tray index for ams_mapping (default 0)"},
                 },
                 "required": ["sd_path"],
                 "additionalProperties": False,
             },
             _t_print,
+        ),
+        tool(
+            "bambu_filament",
+            "Report which filament sources have material on a Bambu printer (AMS slots with type/color/remain + external spool presence). Run this BEFORE starting a print — an A1 with an AMS Lite will silently 'print' from an empty external spool if use_ams:false is sent.",
+            {"type": "object", "properties": {}, "additionalProperties": False},
+            _t_filament,
         ),
         tool(
             "bambu_stop",
@@ -237,6 +269,8 @@ def slash_bambu(args: str = "") -> str:
             return _fmt_status(_blocking(_status_with, _resolve_printer()))
         if action == "discover":
             return _t_discover({})
+        if action == "filament":
+            return _t_filament({})
         if action == "upload":
             return _t_upload({"file": rest})
         if action == "print":
@@ -257,7 +291,7 @@ def register_cli_bambu(parser) -> None:
         "action",
         nargs="?",
         default="status",
-        choices=["status", "discover", "upload", "print", "stop", "light"],
+        choices=["status", "discover", "filament", "upload", "print", "stop", "light"],
         help="what to do (default: status)",
     )
     parser.add_argument("arg", nargs="?", default="", help="action argument (file path / sd_path / light mode)")

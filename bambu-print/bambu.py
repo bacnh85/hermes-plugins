@@ -368,6 +368,48 @@ class BambuMQTT:
         )
         return {"sent": f"chamber_light {mode}"}
 
+    def filament_status(self) -> dict[str, Any]:
+        """Report which filament sources actually have material.
+
+        Returns:
+          ams:    list of {slot, type, name, color, remain_pct} for AMS trays
+          spool:  external-spool (vt_tray) presence bool + type if loaded
+        An A1 Mini with an AMS Lite attached reports both; printing with
+        use_ams:false against an EMPTY spool runs silently and extrudes
+        nothing — check this before starting a job.
+        """
+        self.pushall()
+        out: dict[str, Any] = {"ams": [], "spool": {"present": False}}
+        for msg in reversed(self._messages):
+            p = msg.get("print")
+            if not p:
+                continue
+            ams = (p.get("ams") or {}).get("ams") or []
+            if ams:
+                for unit in ams:
+                    for t in unit.get("tray") or []:
+                        ttype = str(t.get("tray_type") or "").strip()
+                        if not ttype:
+                            continue
+                        out["ams"].append({
+                            "slot": int(t.get("id") or 0),
+                            "type": ttype,
+                            "name": str(t.get("tray_id_name") or ""),
+                            "color": str(t.get("tray_color") or ""),
+                            "remain_pct": t.get("remain"),
+                        })
+            vt = p.get("vt_tray") or {}
+            if vt.get("tray_type"):
+                out["spool"] = {
+                    "present": True,
+                    "type": str(vt.get("tray_type")),
+                    "name": str(vt.get("tray_id_name") or ""),
+                }
+            elif vt:
+                out["spool"] = {"present": False}
+            break
+        return out
+
     def stop(self) -> dict[str, Any]:
         """Stop the current job (gcode_file_stop)."""
         self._client.publish(
@@ -427,11 +469,20 @@ def start(
     host: str, serial: str, access_code: str,
     sd_path: str, subtask_name: str = "",
     bed_level: bool = True, timelapse: bool = False,
+    use_ams: bool = True, ams_slot: int = 0,
 ) -> dict[str, Any]:
     """Start a print of an uploaded SD file via MQTT ``project_file``.
 
     ``sd_path`` is the ``1:/name.gcode.3mf`` string returned by upload().
     Returns the printer's print-state report shortly after the command.
+
+    ``use_ams=True`` (default) feeds from the AMS/AMS-Lite; set False to
+    use the external spool holder. ``ams_slot`` selects the AMS tray for
+    ``ams_mapping``. Live lesson 2026-09-08: an A1 Mini WITH an AMS Lite
+    will happily "print" from an EMPTY external spool if ``use_ams:false``
+    is sent — the job runs, heats, and extrudes nothing. Always confirm
+    which filament source has material before starting (read ``vt_tray``
+    for the spool, ``ams[].tray[]`` for AMS slots).
     """
     # Bambu reads the gcode at a fixed internal path inside the 3mf.
     param = "Metadata/plate_1.gcode"
@@ -461,7 +512,8 @@ def start(
             "flow_cali": False,
             "vibration_cali": False,
             "layer_inspect": False,
-            "use_ams": False,
+            "use_ams": use_ams,
+            "ams_mapping": [] if not use_ams else [int(ams_slot)],
         }
     }
     with BambuMQTT(host, serial, access_code) as prn:
