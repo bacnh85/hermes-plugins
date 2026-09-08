@@ -45,13 +45,24 @@ Dependency: `paho-mqtt` (Python) — install with
 1. **Slice** the model for the A1 Mini in Bambu Studio / OrcaSlicer
    (choose the A1 Mini profile + your filament), export a **`.gcode.3mf`**.
    Bambu's `project_file` command only accepts 3MF-wrapped gcode — a plain
-   `.gcode` is rejected by design.
-2. **Upload** it: `hermes bambu upload /path/to/plate_1.gcode.3mf`
+   `.gcode` is rejected by design. (`bambu_test_print.py` does this for a
+   tiny 20×20×1mm square — the end-to-end verification part.)
+2. **Check filament first**: `hermes bambu filament` — confirms which AMS
+   slots have material vs the external spool. **An A1 Mini with an AMS
+   Lite will silently "print" from an EMPTY external spool** (job runs,
+   heats, extrudes nothing) if you send `use_ams:false` — the plugin now
+   defaults to AMS feeding and reports the empty-spool trap.
+3. **Upload** it: `hermes bambu upload /path/to/plate_1.gcode.3mf`
    → prints `Uploaded OK → SD 1:/plate_1.gcode.3mf`
-3. **Start**: `hermes bambu print '1:/plate_1.gcode.3mf'`
-   → watch the printer's screen (A1 series shows a confirm dialog for LAN
-   jobs). The job then reports progress via `bambu_status`.
-4. **Monitor / stop** as needed.
+4. **Start**: `hermes bambu print '1:/plate_1.gcode.3mf'` (uses AMS slot 0
+   by default; pass `--arg ams_slot=N` to pick another tray). The AMS
+   feeds automatically — no manual filament pushing needed.
+5. **Monitor / stop** as needed: `hermes bambu status` (stage, progress %,
+   temps), `hermes bambu stop`.
+
+Live-verified 2026-09-08: 20×20×1mm red PLA square printed to 100% via AMS
+slot 0 on an A1 Mini — first attempt (external spool, no filament) ran
+empty; adding `use_ams:true` + `ams_mapping` fixed it.
 
 ## For other Hermes agents (integration notes)
 
