@@ -51,6 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/bacnh85/hermes-plugins/main/install
 |---|---|---|---|
 | [`omniroute/`](./omniroute) | `python3 install_plugins.py omniroute` (from a clone, or the curl one-liner above) | model-provider | Add OmniRoute as a Hermes `model.provider` (OpenAI-compatible routing gateway). |
 | [`munin/`](./munin) | `hermes plugins install bacnh85/hermes-plugins/munin` | memory | Munin Context Core as a Hermes `memory.provider` — long-term memory w/ E2EE + GraphRAG. Pure-stdlib REST (no Node/MCP subprocess). |
+| [`bambu-print/`](./bambu-print) | `hermes plugins install bacnh85/hermes-plugins/bambu-print` (or copy to `~/.hermes/plugins/`) | standalone | Bambu Lab LAN-mode 3D printing: discover printer (TLS-cert serial), live status, FTPS upload of `.gcode.3mf`, MQTT print start/stop/light. `/bambu` slash + `hermes bambu` CLI + 6 agent tools. End-to-end verified (sliced + printed on an A1 Mini). |
 
 ---
 
