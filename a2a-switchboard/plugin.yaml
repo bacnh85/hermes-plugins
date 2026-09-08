@@ -1,0 +1,21 @@
+name: a2a-switchboard
+kind: standalone
+version: 1.0.0
+description: >
+  Fleet switchboard integration for Hermes: registers this agent with one or
+  more a2a-switchboard gateways and holds a REVERSE CHANNEL (outbound SSE) to
+  each, so the fleet can always reach this Hermes even when it sits behind a
+  firewall/NAT with no inbound port. All secrets live in .env — nothing
+  credential-shaped goes in config.yaml. Pure stdlib, no core patches.
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/a2a-switchboard
+tags: [a2a, switchboard, reverse-channel, mesh, standalone]
+requires_env:
+  - name: A2A_SWITCHBOARD_TOKENS
+    description: >
+      Gateway registration tokens, one mapping per switchboard,
+      semicolon-separated: 'name=<board-alias>:token=<agw_...>' —
+      see .env.example in the plugin directory.
+    url: ""
+    secret: true

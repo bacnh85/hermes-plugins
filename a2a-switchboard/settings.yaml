@@ -1,0 +1,40 @@
+# a2a-switchboard plugin settings
+#
+# Config lives in ~/.hermes/config.yaml under
+#   plugins.entries.a2a-switchboard.settings
+# Secrets (gateway/registration tokens and your upstream_token) live in
+# ~/.hermes/.env — NEVER in this file.
+#
+# `gateways` is a LIST — register with as many switchboards as you like.
+# Each entry: the alias must match the `name=<alias>` in
+# A2A_SWITCHBOARD_TOKENS (see plugin .env.example).
+
+gateways:
+  - name: fleet            # alias — must match the name= in A2A_SWITCHBOARD_TOKENS
+    url: http://172.30.55.22:9920
+  - name: dev              # second board example (local dev copy)
+    url: http://127.0.0.1:9920
+
+# How this agent presents itself to each board (also sent on heartbeats).
+# peer_name must be unique per board; [a-zA-Z0-9._-], 1-64 chars.
+peer_name: hermes-macbook-m1
+
+# URL the switchboard would use to reach this agent directly. Leave empty
+# when this host is firewalled/NAT'd — the reverse channel makes it moot.
+# Set it when the host IS reachable and you want direct-mode delivery too.
+public_url: ""
+
+# Heartbeat interval in seconds (PATCH /register refresh, keeps the
+# directory entry fresh and re-announces skills). 60 is polite; boards
+# rate-limit /register to 20 req/min per IP.
+heartbeat_sec: 60
+
+# Drop the reverse channel when no request has flowed for this many
+# seconds... 0 = keep it open forever (default; boards ping every 15s to
+# keep the SSE alive, so an idle channel is cheap).
+idle_timeout_sec: 0
+
+# Register + open channels in every process (CLI one-shots too)?
+# Default false: only the long-lived gateway process (and the web server)
+# registers. CLI one-shots skip it so `hermes chat -q` stays fast.
+gateway_only: true
