@@ -130,6 +130,13 @@ def main() -> int:
     make_stl(stl)
     slice_for_a1mini(stl, out)
 
+    # CLI slicing drops the filament preset's temps (bed 35°C instead of
+    # 65°C PLA) — patch them before upload or the part won't adhere.
+    fixed = out.replace(".gcode.3mf", ".fixed.gcode.3mf")
+    fixer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fix_bambu_temps.py")
+    subprocess.run([sys.executable, fixer, out, fixed], check=True, timeout=60)
+    out = fixed
+
     print("Uploading over FTPS ...")
     sd = B.upload(e["host"], e["code"], out, remote_name=args.remote_name)
     print(f"Uploaded -> {sd}")
