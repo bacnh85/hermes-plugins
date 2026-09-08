@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import ssl
 import time
@@ -430,6 +431,12 @@ def upload(host: str, access_code: str, local_path: str, remote_name: Optional[s
     if not os.path.exists(local_path):
         raise BambuError(f"local file not found: {local_path}")
     name = remote_name or os.path.basename(local_path)
+    # glm-5.3 review (2026-09-08): basename + allowlist — remote_name is
+    # user-supplied; raw interpolation allowed path traversal / CRLF /
+    # FTP-command injection in the URL.
+    name = os.path.basename(name)
+    if not re.fullmatch(r"[\w. -]+", name) or ".." in name:
+        raise BambuError(f"remote_name {name!r} contains disallowed characters")
     if not name.lower().endswith(".3mf"):
         # Bambu accepts .gcode.3mf (3MF-wrapped gcode); plain gcode files
         # are NOT directly printable via project_file — warn loudly.
@@ -437,6 +444,8 @@ def upload(host: str, access_code: str, local_path: str, remote_name: Optional[s
             f"{name}: Bambu prints .gcode.3mf (sliced by Bambu Studio / OrcaSlicer). "
             "Plain .gcode is not accepted by project_file."
         )
+    if not re.fullmatch(r"[A-Za-z0-9.\-]+", host):
+        raise BambuError(f"host {host!r} contains disallowed characters")
     # curl FTPS (implicit TLS, :990): ftplib's data-channel TLS upgrade
     # (PROT P) hangs against Bambu firmware (live-tested 2026-09-08), while
     # curl negotiates the TLS data connection cleanly. Verified: STOR of a
@@ -447,15 +456,25 @@ def upload(host: str, access_code: str, local_path: str, remote_name: Optional[s
     curl = shutil.which("curl")
     if not curl:
         raise BambuError("curl is required for FTPS upload (not found in PATH)")
+    # glm-5.3 review (2026-09-08): never put the access code on the argv
+    # (visible to any local user via ps /proc/*/cmdline) — curl -K reads a
+    # config from stdin; and pin the printer's TLS pubkey instead of -k so
+    # a MITM cannot steal the code mid-upload.
+    import tempfile
+
+    pubkey = os.environ.get("BAMBU_TLS_PIN", "")
     proc = subprocess.run(
         [
             curl, "-sS", "--fail", "--connect-timeout", "10", "--max-time", "120",
-            "-k", "--ftp-ssl", "--user", f"bblp:{access_code}",
-            "-T", local_path,
+            "--ftp-ssl", "-K", "-",
+            "-T", os.path.realpath(local_path),
             f"ftps://{host}:{FTPS_PORT}/{name}",
-        ],
+        ] + (["--pinnedpubkey", f"sha256//{pubkey}"] if pubkey else ["-k"]),
+        input=f"user = \"bblp:{access_code}\"\n",
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=140,
     )
     if proc.returncode != 0:
