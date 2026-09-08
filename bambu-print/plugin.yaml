@@ -1,0 +1,21 @@
+name: bambu-print
+kind: standalone
+version: 1.0.0
+description: "Bambu Lab LAN-mode 3D printing for Hermes — discover the printer on the LAN, read live status/telemetry, upload .gcode.3mf over FTPS, start/stop prints and monitor progress over the local MQTT API (no Bambu cloud account needed). Provides /bambu slash command + hermes bambu CLI."
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/bambu-print
+tags: [bambu, 3d-print, printing, mqtt, ftps, lan, standalone, hardware]
+requires_env:
+  - name: BAMBU_ACCESS_CODE
+    description: "Printer LAN-mode access code (printer screen: Settings → LAN mode → Access code)"
+    url: "https://wiki.bambulab.com/en/a1-mini/network-connection"
+    secret: true
+  - name: BAMBU_HOST
+    description: "Printer LAN IP or hostname (default: auto-discover via TLS-cert scan of the LAN; set to skip discovery)"
+    url: "https://wiki.bambulab.com/en/a1-mini/network-connection"
+    secret: false
+  - name: BAMBU_SERIAL
+    description: "Printer serial number (default: read from the TLS certificate CN during discovery; set to skip)"
+    url: ""
+    secret: false
