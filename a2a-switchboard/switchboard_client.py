@@ -212,6 +212,10 @@ class GatewayClient:
             "name": self.peer_name,
             "url": self.public_url or f"http://127.0.0.1:9900/",
         }
+        # A loopback fallback only makes sense for a board on this host;
+        # remote boards would probe an address they can never reach.
+        if not self.public_url and "127.0.0.1" not in self.url and "localhost" not in self.url:
+            del body["url"]
         if self.card:
             body["card"] = self.card
         if self.upstream_token:

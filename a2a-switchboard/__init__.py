@@ -139,6 +139,10 @@ class _Runtime:
                 continue
             alias = str(gw["name"]).strip()
             url = str(gw["url"]).strip().rstrip("/")
+            # Per-gateway public_url override: what THIS board would use to
+            # reach us directly (LAN address for remote boards, loopback for
+            # a board on this host). Falls back to the global public_url.
+            gw_public = str(gw.get("public_url") or public_url)
             token = tokens.get(alias) or caller_seeds.get(alias)
             if not token:
                 persisted = load_caller_token(alias)
@@ -153,7 +157,7 @@ class _Runtime:
                 token=token,
                 peer_name=peer_name,
                 upstream_token=upstream,
-                public_url=public_url,
+                public_url=gw_public,
                 card=_agent_card(),
             )
             ok = client.register(force=True)

@@ -22,6 +22,8 @@ peer_name: hermes-macbook-m1
 # URL the switchboard would use to reach this agent directly. Leave empty
 # when this host is firewalled/NAT'd — the reverse channel makes it moot.
 # Set it when the host IS reachable and you want direct-mode delivery too.
+# Override per gateway: gateways[].public_url (e.g. LAN IP for a remote
+# board, loopback for a board on this host).
 public_url: ""
 
 # Heartbeat interval in seconds (PATCH /register refresh, keeps the
