@@ -55,18 +55,9 @@ def _parse_token_map(raw: str, kind: str) -> dict[str, str]:
 
 def _settings(ctx: Any) -> dict[str, Any]:
     """Plugin settings dict (settings.yaml → config subtree)."""
-    try:
-        value = ctx.get_config("")  # whole subtree, when supported
-        if isinstance(value, dict) and value:
-            return value
-    except Exception:
-        pass
-    # Fallback: read the file-relative keys one by one
     cfg: dict[str, Any] = {}
-    for key in (
-        "gateways", "peer_name", "public_url", "heartbeat_sec",
-        "idle_timeout_sec", "gateway_only", "local_port",
-    ):
+    for key in ("gateways", "peer_name", "public_url", "heartbeat_sec",
+                "idle_timeout_sec", "gateway_only", "local_port"):
         try:
             v = ctx.get_config(key)
         except Exception:
