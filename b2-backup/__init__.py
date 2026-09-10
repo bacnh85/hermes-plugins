@@ -164,7 +164,9 @@ _RUN_RUNNING = False
 def _act_init(settings: dict[str, Any]) -> dict[str, Any]:
     repo = _repo(settings)
     rc, out, err = _run_restic(repo, ["init"], timeout=300)
-    if rc == 0 or "config file already exists" in (err + out):
+    combined = (err + out).lower()
+    already = "config file already exists" in combined or "already initialized" in combined
+    if rc == 0 or already:
         return {"ok": True, "action": "init", "repo": repo,
                 "message": "repository ready (created now)" if rc == 0 else "repository already existed"}
     return {"ok": False, "action": "init", "repo": repo, "error": (err or out).strip()[-2000:]}
