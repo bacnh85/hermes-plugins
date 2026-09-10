@@ -118,8 +118,14 @@ def _repo(settings: dict[str, Any]) -> str:
 
 def _restic_env(repo: str) -> dict[str, str]:
     env = os.environ.copy()
-    env["B2_ACCOUNT_ID"] = (os.environ.get("B2_ACCOUNT_ID") or "").strip()
-    env["B2_APPLICATION_KEY"] = (os.environ.get("B2_APPLICATION_KEY") or "").strip()
+    acct = (os.environ.get("B2_ACCOUNT_ID") or "").strip()
+    key = (os.environ.get("B2_APPLICATION_KEY") or "").strip()
+    # restic's B2 env names vary by version (B2_ACCOUNT_ID/B2_ACCOUNT_KEY vs
+    # B2_APPLICATION_KEY[_ID]) — set every alias so any restic works.
+    env["B2_ACCOUNT_ID"] = acct
+    env["B2_APPLICATION_KEY_ID"] = acct
+    env["B2_ACCOUNT_KEY"] = key
+    env["B2_APPLICATION_KEY"] = key
     env["RESTIC_PASSWORD"] = os.environ.get("RESTIC_PASSWORD") or ""
     env["RESTIC_REPOSITORY"] = repo  # ours wins over any stray shell value
     return env
