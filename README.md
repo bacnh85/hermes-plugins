@@ -53,6 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/bacnh85/hermes-plugins/main/install
 | [`munin/`](./munin) | `hermes plugins install bacnh85/hermes-plugins/munin` | memory | Munin Context Core as a Hermes `memory.provider` — long-term memory w/ E2EE + GraphRAG. Pure-stdlib REST (no Node/MCP subprocess). |
 | [`bambu-print/`](./bambu-print) | `hermes plugins install bacnh85/hermes-plugins/bambu-print` (or copy to `~/.hermes/plugins/`) | standalone | Bambu Lab LAN-mode 3D printing: discover printer (TLS-cert serial), live status, FTPS upload of `.gcode.3mf`, MQTT print start/stop/light. `/bambu` slash + `hermes bambu` CLI + 6 agent tools. End-to-end verified (sliced + printed on an A1 Mini). |
 | [`a2a-switchboard/`](./a2a-switchboard) | `hermes plugins install bacnh85/hermes-plugins/a2a-switchboard` | standalone | Fleet switchboard integration: multi-board registration + reverse channel — firewalled agents stay reachable, calls attributed. See its [README](./a2a-switchboard/README.md). |
+| [`b2-backup/`](./b2-backup) | `hermes plugins install bacnh85/hermes-plugins/b2-backup` | standalone | Self-backup of the Hermes home to Backblaze B2: restic client-side encryption, incremental + dedup, per-host repo prefix, retention pruning. `hermes b2backup` CLI + agent tool. End-to-end verified (real B2 upload + restore). |
 
 ---
 
