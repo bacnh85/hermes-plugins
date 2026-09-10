@@ -59,11 +59,14 @@ hermes b2backup restore latest --target /tmp/hermes-restore
 hermes b2backup restore 9bc6b16a --target /tmp/hermes-restore
 hermes b2backup forget                    # apply retention + prune
 hermes b2backup check --read-data         # integrity (slow with --read-data)
+hermes b2backup verify                    # restore rehearsal: pull config.yaml+.env,
+                                          #   hash-compare vs live, clean up (safe)
+hermes b2backup restore <id> --dry-run    # preview what would be restored
 ```
 
 In-session: `/b2backup status`, `/b2backup restore abc12345 target=/tmp/r`.
 Agent tool: `hermes_backup_run` (toolset `backup`, actions run/status/
-snapshots/restore/forget/unlock/check/init).
+snapshots/restore/verify/forget/unlock/check/init).
 
 ## Scheduling
 
