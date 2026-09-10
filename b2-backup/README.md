@@ -52,12 +52,13 @@ plugins:
 ## Use
 
 ```bash
-hermes b2backup run                 # backup now
-hermes b2backup status              # repo size + latest snapshot
-hermes b2backup snapshots           # list snapshots
-hermes b2backup restore latest /tmp/hermes-restore
-hermes b2backup forget              # apply retention + prune
-hermes b2backup check --read-data   # integrity (slow with --read-data)
+hermes b2backup run                       # backup now
+hermes b2backup status                    # repo size + latest snapshot
+hermes b2backup snapshots                 # list snapshots
+hermes b2backup restore latest --target /tmp/hermes-restore
+hermes b2backup restore 9bc6b16a --target /tmp/hermes-restore
+hermes b2backup forget                    # apply retention + prune
+hermes b2backup check --read-data         # integrity (slow with --read-data)
 ```
 
 In-session: `/b2backup status`, `/b2backup restore abc12345 target=/tmp/r`.

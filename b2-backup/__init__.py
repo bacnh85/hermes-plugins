@@ -446,35 +446,38 @@ def _slash_b2backup(raw_args: str) -> str:
     return _pretty(result)
 
 
-def _cli_setup(subparsers) -> None:
-    p_run = subparsers.add_parser("run", help="encrypted incremental backup now")
-    p_run.set_defaults(cli_action="run")
-    subparsers.add_parser("status", help="repo size + latest snapshot").set_defaults(cli_action="status")
-    subparsers.add_parser("snapshots", help="list snapshots").set_defaults(cli_action="snapshots")
-    subparsers.add_parser("init", help="initialize the B2 repo (idempotent)").set_defaults(cli_action="init")
-    subparsers.add_parser("forget", help="apply retention policy + prune").set_defaults(cli_action="forget")
-    subparsers.add_parser("unlock", help="remove stale repo locks").set_defaults(cli_action="unlock")
-    p_check = subparsers.add_parser("check", help="repo integrity check")
-    p_check.add_argument("--read-data", action="store_true", help="verify data content too (slow)")
-    p_check.set_defaults(cli_action="check")
-    p_restore = subparsers.add_parser("restore", help="restore a snapshot to a target dir")
-    p_restore.add_argument("snapshot_id", nargs="?", default="latest")
-    p_restore.add_argument("target", help="target directory (scratch dir recommended)")
-    p_restore.add_argument("--confirm", action="store_true",
-                           help="allow restoring into the live Hermes home")
-    p_restore.set_defaults(cli_action="restore")
+def _cli_setup(parser) -> None:
+    # flat action/arg shape — same pattern as bambu-print (proven in main.py)
+    parser.add_argument(
+        "action", nargs="?", default="run", choices=list(_ACTIONS),
+        help="what to do (default: run)",
+    )
+    parser.add_argument("arg", nargs="?", default="",
+                        help="snapshot id for restore (default: latest)")
+    parser.add_argument("--target", default="", help="restore target directory")
+    parser.add_argument("--confirm", action="store_true",
+                        help="allow restoring into the live Hermes home")
+    parser.add_argument("--read-data", action="store_true", dest="read_data",
+                        help="check: verify data content too (slow)")
 
 
 def _cli_handler(args) -> None:
+    action = str(getattr(args, "action", None) or "run")
+    target = str(getattr(args, "target", "") or "")
+    if action == "restore" and not target:
+        print("restore needs --target <dir> (scratch dir recommended)")
+        raise SystemExit(2)
     result = backup_action(
         _CTX,
-        action=str(getattr(args, "cli_action", None) or "run"),
-        snapshot_id=str(getattr(args, "snapshot_id", "") or ""),
-        target=str(getattr(args, "target", "") or ""),
+        action=action,
+        snapshot_id=str(getattr(args, "arg", "") or ""),
+        target=target,
         confirm=bool(getattr(args, "confirm", False)),
         read_data=bool(getattr(args, "read_data", False)),
     )
     print(_pretty(result))
+    if not result.get("ok"):
+        raise SystemExit(1)
 
 
 def register(ctx) -> None:
