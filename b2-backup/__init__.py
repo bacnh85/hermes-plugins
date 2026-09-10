@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 from pathlib import Path
 from typing import Any
@@ -66,7 +67,7 @@ _DEFAULT_EXCLUDES = [
     "state.db-journal",
 ]
 
-_ACTIONS = ("run", "status", "snapshots", "restore", "forget", "unlock", "check", "init")
+_ACTIONS = ("run", "status", "snapshots", "restore", "verify", "forget", "unlock", "check", "init")
 
 
 # ── config plumbing ────────────────────────────────────────────────────
@@ -277,30 +278,92 @@ def _act_status(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def _act_restore(settings: dict[str, Any], snapshot_id: str, target: str,
-                 confirm: bool) -> dict[str, Any]:
-    if not target:
+                 confirm: bool, dry_run: bool = False) -> dict[str, Any]:
+    if not dry_run and not target:
         return {"ok": False, "action": "restore",
                 "error": "target directory required (action=restore, snapshot_id=..., target=...)"}
-    target_path = Path(target).expanduser()
-    home = _hermes_home()
-    try:
-        target_resolved = target_path.resolve()
-    except OSError:
-        target_resolved = target_path
-    inside_home = target_resolved == home or home in target_resolved.parents
-    if inside_home and not confirm:
-        return {"ok": False, "action": "restore",
-                "error": (f"refusing to restore into {home} (live Hermes state) without "
-                          f"confirm=true — restore to a scratch dir first, or pass confirm=true to overwrite")}
+    args = ["restore", snapshot_id or "latest"]
+    if dry_run:
+        args.append("--dry-run")
+        target = target or tempfile.mkdtemp(prefix="b2b-dryrun-")  # never written
+    else:
+        target_path = Path(target).expanduser()
+        home = _hermes_home()
+        try:
+            target_resolved = target_path.resolve()
+        except OSError:
+            target_resolved = target_path
+        inside_home = target_resolved == home or home in target_resolved.parents
+        if inside_home and not confirm:
+            return {"ok": False, "action": "restore",
+                    "error": (f"refusing to restore into {home} (live Hermes state) without "
+                              f"confirm=true — restore to a scratch dir first, or pass confirm=true to overwrite")}
+    args += ["--target", str(Path(target).expanduser())]
     rc, out, err = _run_restic(
-        _repo(settings),
-        ["restore", snapshot_id or "latest", "--target", str(target_path)],
+        _repo(settings), args,
         timeout=int(settings.get("timeout_sec") or 3600),
     )
     if rc != 0:
         return {"ok": False, "action": "restore", "error": (err or out).strip()[-2000:]}
-    return {"ok": True, "action": "restore", "snapshot_id": snapshot_id or "latest",
-            "target": str(target_path), "output": out.strip()[-1000:]}
+    return {"ok": True, "action": "restore", "dry_run": dry_run,
+            "snapshot_id": snapshot_id or "latest",
+            "target": str(Path(target).expanduser()), "output": out.strip()[-1500:]}
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _act_verify(settings: dict[str, Any], snapshot_id: str) -> dict[str, Any]:
+    """Restore rehearsal: pull critical files from the repo into a temp dir,
+    hash-compare against the live home, clean up. Proves the restore path
+    (download + decryption) actually works — do this before you need it."""
+    repo = _repo(settings)
+    home = _hermes_home()
+    sid = snapshot_id or "latest"
+    rc, out, err = _run_restic(repo, ["snapshots", sid], timeout=300)
+    if rc != 0:
+        return {"ok": False, "action": "verify", "error": (err or out).strip()[-2000:]}
+    base = ""
+    for line in (out or "").strip().splitlines():
+        try:
+            data = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(data, list) and data and data[0].get("paths"):
+            base = str(data[0]["paths"][0]).strip("/")
+    if not base:
+        return {"ok": False, "action": "verify", "error": "could not resolve snapshot path prefix"}
+    tmp = tempfile.mkdtemp(prefix="b2b-verify-")
+    try:
+        includes: list[str] = []
+        for name in ("config.yaml", ".env"):
+            includes += ["--include", f"/{base}/{name}"]
+        rc, out, err = _run_restic(
+            repo, ["restore", sid, "--target", tmp, *includes],
+            timeout=int(settings.get("timeout_sec") or 3600),
+        )
+        if rc != 0:
+            return {"ok": False, "action": "verify", "error": (err or out).strip()[-2000:]}
+        files: dict[str, Any] = {}
+        for name in ("config.yaml", ".env"):
+            restored = Path(tmp) / base / name
+            live = home / name
+            entry: dict[str, Any] = {"restored": restored.exists()}
+            if restored.exists():
+                entry["bytes"] = restored.stat().st_size
+                if live.exists():
+                    entry["identical_to_live"] = _sha256(restored) == _sha256(live)
+                else:
+                    entry["identical_to_live"] = None  # no live counterpart
+            files[name] = entry
+        ok = all(f["restored"] for f in files.values())
+        return {"ok": ok, "action": "verify", "snapshot_id": sid, "files": files,
+                "note": "identical_to_live=false just means live drifted since the snapshot — "
+                        "the restore path itself is proven when restored=true"}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _act_forget(settings: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +404,7 @@ def _act_check(settings: dict[str, Any], read_data: bool) -> dict[str, Any]:
 
 def backup_action(ctx: Any, action: str = "run", snapshot_id: str = "",
                   target: str = "", confirm: bool = False,
-                  read_data: bool = False) -> dict[str, Any]:
+                  read_data: bool = False, dry_run: bool = False) -> dict[str, Any]:
     settings = _settings(ctx)
     action = (action or "run").strip().lower()
     if action not in _ACTIONS:
@@ -358,7 +421,9 @@ def backup_action(ctx: Any, action: str = "run", snapshot_id: str = "",
     if action == "status":
         return _act_status(settings)
     if action == "restore":
-        return _act_restore(settings, snapshot_id, target, confirm)
+        return _act_restore(settings, snapshot_id, target, confirm, dry_run)
+    if action == "verify":
+        return _act_verify(settings, snapshot_id)
     if action == "forget":
         return _act_forget(settings)
     if action == "unlock":
@@ -380,6 +445,7 @@ def _tool_handler(ctx: Any):
                 target=str(args.get("target") or ""),
                 confirm=bool(args.get("confirm")),
                 read_data=bool(args.get("read_data")),
+                dry_run=bool(args.get("dry_run")),
             )
         except subprocess.TimeoutExpired:
             result = {"ok": False, "error": "restic timed out — raise b2-backup.settings.timeout_sec"}
@@ -438,6 +504,7 @@ def _slash_b2backup(raw_args: str) -> str:
             target=str(args.get("target") or ""),
             confirm=str(args.get("confirm", "")).lower() in ("1", "true", "yes", "y"),
             read_data=str(args.get("read_data", "")).lower() in ("1", "true", "yes", "y"),
+            dry_run=str(args.get("dry_run", args.get("dryrun", ""))).lower() in ("1", "true", "yes", "y"),
         )
     except subprocess.TimeoutExpired:
         result = {"ok": False, "error": "restic timed out — raise b2-backup.settings.timeout_sec"}
@@ -453,10 +520,12 @@ def _cli_setup(parser) -> None:
         help="what to do (default: run)",
     )
     parser.add_argument("arg", nargs="?", default="",
-                        help="snapshot id for restore (default: latest)")
+                        help="snapshot id for restore/verify (default: latest)")
     parser.add_argument("--target", default="", help="restore target directory")
     parser.add_argument("--confirm", action="store_true",
                         help="allow restoring into the live Hermes home")
+    parser.add_argument("--dry-run", action="store_true", dest="dry_run",
+                        help="restore: preview what would be restored, write nothing")
     parser.add_argument("--read-data", action="store_true", dest="read_data",
                         help="check: verify data content too (slow)")
 
@@ -464,8 +533,8 @@ def _cli_setup(parser) -> None:
 def _cli_handler(args) -> None:
     action = str(getattr(args, "action", None) or "run")
     target = str(getattr(args, "target", "") or "")
-    if action == "restore" and not target:
-        print("restore needs --target <dir> (scratch dir recommended)")
+    if action == "restore" and not target and not getattr(args, "dry_run", False):
+        print("restore needs --target <dir> (scratch dir recommended), or --dry-run to preview")
         raise SystemExit(2)
     result = backup_action(
         _CTX,
@@ -474,6 +543,7 @@ def _cli_handler(args) -> None:
         target=target,
         confirm=bool(getattr(args, "confirm", False)),
         read_data=bool(getattr(args, "read_data", False)),
+        dry_run=bool(getattr(args, "dry_run", False)),
     )
     print(_pretty(result))
     if not result.get("ok"):
@@ -491,10 +561,13 @@ def register(ctx) -> None:
             "name": _TOOL_ID,
             "description": (
                 "Backup/self-restore of this Hermes home to Backblaze B2 (restic-encrypted). "
-                "Actions: run (default — incremental encrypted snapshot + nothing else), "
+                "Actions: run (default — incremental encrypted snapshot), "
                 "status (repo size + latest snapshot), snapshots (list), "
-                "restore (snapshot_id + target scratch dir), forget (apply retention + prune), "
-                "unlock, check, init."
+                "restore (snapshot_id + target scratch dir; dry_run=true previews without writing; "
+                "restoring into the live Hermes home needs confirm=true), "
+                "verify (restore rehearsal — pulls config.yaml+.env from the repo into a temp dir, "
+                "hash-compares, cleans up; proves the restore path works), "
+                "forget (apply retention + prune), unlock, check, init."
             ),
             "parameters": {
                 "type": "object",
@@ -503,12 +576,14 @@ def register(ctx) -> None:
                                "enum": list(_ACTIONS),
                                "description": "default: run"},
                     "snapshot_id": {"type": "string",
-                                    "description": "for restore — snapshot short id, or 'latest'"},
+                                    "description": "for restore/verify — snapshot short id, or 'latest'"},
                     "target": {"type": "string",
                                "description": "for restore — target directory (use a scratch dir; "
                                               "restoring into the live Hermes home needs confirm=true)"},
                     "confirm": {"type": "boolean",
                                 "description": "required to restore into the live Hermes home"},
+                    "dry_run": {"type": "boolean",
+                                "description": "for restore — preview what would be restored, write nothing"},
                     "read_data": {"type": "boolean",
                                   "description": "for check — full data read (slow) instead of metadata-only"},
                 },
@@ -523,7 +598,7 @@ def register(ctx) -> None:
         "b2backup",
         handler=_slash_b2backup,
         description="Hermes home backup to Backblaze B2 (restic-encrypted): run/status/snapshots/restore/forget",
-        args_hint="[run|status|snapshots|restore <id> target=...|forget|unlock|check]",
+        args_hint="[run|status|snapshots|verify|restore <id> target=... [dry_run=true]|forget|unlock|check]",
     )
     ctx.register_cli_command(
         "b2backup",
