@@ -1,0 +1,31 @@
+name: b2-backup
+kind: standalone
+version: 1.0.0
+description: >
+  Self-backup of the Hermes home (~/.hermes) to Backblaze B2 with restic:
+  encrypted at rest (AES-256 via RESTIC_PASSWORD), deduplicated snapshots,
+  retention pruning, and a per-host repo prefix (b2:<bucket>/hermes-selfbackup/<hostname>)
+  so multiple Hermes machines never overwrite each other. One agent tool
+  (hermes_backup_run) + `hermes b2backup` CLI. Secrets live in .env only.
+author: bacnh85
+license: MIT
+homepage: https://github.com/bacnh85/hermes-plugins/tree/main/b2-backup
+tags: [backup, restic, backblaze, b2, self-backup, standalone]
+requires_env:
+  - name: B2_ACCOUNT_ID
+    description: "Backblaze B2 account ID (keyID)"
+    url: ""
+    secret: true
+  - name: B2_APPLICATION_KEY
+    description: "Backblaze B2 application key"
+    url: ""
+    secret: true
+  - name: B2_BUCKET
+    description: "B2 bucket name (e.g. hlab-prod-backup)"
+    url: ""
+    secret: false
+  - name: RESTIC_PASSWORD
+    description: "Restic repository password — encrypts all snapshots. LOSE IT = LOSE THE BACKUP."
+    url: ""
+    secret: true
+hooks: []
