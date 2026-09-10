@@ -112,7 +112,8 @@ def _host(settings: dict[str, Any]) -> str:
 def _repo(settings: dict[str, Any]) -> str:
     bucket = (os.environ.get("B2_BUCKET") or "").strip()
     prefix = str(settings.get("repo_prefix") or "hermes-selfbackup").strip("/")
-    return f"b2:{bucket}/{prefix}/{_host(settings)}"
+    # restic B2 location syntax: b2:<bucket>:<path> (colon, not slash)
+    return f"b2:{bucket}:{prefix}/{_host(settings)}"
 
 
 def _restic_env(repo: str) -> dict[str, str]:
