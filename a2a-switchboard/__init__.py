@@ -57,7 +57,8 @@ def _settings(ctx: Any) -> dict[str, Any]:
     """Plugin settings dict (settings.yaml → config subtree)."""
     cfg: dict[str, Any] = {}
     for key in ("gateways", "peer_name", "public_url", "heartbeat_sec",
-                "idle_timeout_sec", "gateway_only", "local_port"):
+                "idle_timeout_sec", "gateway_only", "local_port",
+                "ensure_channel_on"):
         try:
             v = ctx.get_config(key)
         except Exception:
@@ -82,7 +83,7 @@ class _Runtime:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._channels: list[Any] = []
+        self._channels: dict[str, Any] = {}
         self._clients: list[Any] = []
         self._started = False
 
@@ -120,7 +121,15 @@ class _Runtime:
         except (TypeError, ValueError):
             local_port = 9900
 
-        from .channel_client import ChannelClient
+        # ensure_channel_on (default true): the reverse channel IS the point
+        # of the plugin — keep it open even when the board could reach us
+        # directly at public_url. false opts a board back into direct-only.
+        ensure_on = cfg.get("ensure_channel_on", True)
+        try:
+            from .channel_client import ChannelClient
+        except Exception:
+            import channel_client as ccmod  # hyphen-named dir: fallback import
+            ChannelClient = ccmod.ChannelClient
 
         started: list[str] = []
         notes: list[str] = []
@@ -158,6 +167,9 @@ class _Runtime:
             # A board is worth a channel when it accepted us OR we hold a
             # stored caller token (entry already accepted earlier).
             if ok or load_caller_token(alias):
+                if ensure_on is False:
+                    notes.append(f"{alias}: ensure_channel_on=false — direct only, no reverse channel")
+                    continue
                 chan = ChannelClient(
                     board_url=url,
                     peer_name=peer_name,
@@ -167,7 +179,7 @@ class _Runtime:
                 )
                 chan.start()
                 with self._lock:
-                    self._channels.append(chan)
+                    self._channels[alias] = chan
                 started.append(alias)
             else:
                 notes.append(f"{alias}: registration failed (pending/rejected?)")
@@ -192,6 +204,7 @@ class _Runtime:
                 time.sleep(interval)
                 with self._lock:
                     clients = list(self._clients)
+                    channels = dict(self._channels)
                 for client in clients:
                     try:
                         client.register()
@@ -200,6 +213,21 @@ class _Runtime:
                             "a2a-switchboard[%s]: heartbeat failed: %s",
                             client.board_name, exc,
                         )
+                # Self-heal: a channel thread can die (host sleep, long
+                # network loss). revive dead channels so "reverse" stays the
+                # steady state instead of silently decaying to direct.
+                for alias, chan in channels.items():
+                    if chan.is_running:
+                        continue
+                    try:
+                        chan.start()
+                        logger.warning(
+                            "a2a-switchboard[%s]: revived dead reverse channel", alias
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "a2a-switchboard[%s]: channel revive failed: %s", alias, exc
+                        )
 
         threading.Thread(
             target=_loop, name="a2a-switchboard-heartbeat", daemon=True
@@ -207,8 +235,8 @@ class _Runtime:
 
     def stop(self) -> None:
         with self._lock:
-            channels, self._channels = self._channels, []
-        for chan in channels:
+            channels, self._channels = self._channels, {}
+        for chan in channels.values():
             try:
                 chan.stop()
             except Exception:

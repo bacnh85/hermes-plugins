@@ -40,3 +40,9 @@ idle_timeout_sec: 0
 # Default false: only the long-lived gateway process (and the web server)
 # registers. CLI one-shots skip it so `hermes chat -q` stays fast.
 gateway_only: true
+
+# Keep the reverse channel OPEN even when the board could reach this agent
+# directly at public_url. true (default) = channel is the steady state and
+# self-heals via the heartbeat; false = direct-only (board delivers at the
+# pinned URL; no SSE is opened).
+ensure_channel_on: true

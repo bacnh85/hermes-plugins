@@ -142,6 +142,12 @@ class GatewayClient:
                 raw = exc.read() if exc.fp else b"{}"
             except Exception:
                 raw = b"{}"
+        except OSError:
+            # URLError/socket failure (board down, DNS, timed out) — not an
+            # HTTP status. Returns code 0 ("unreachable") instead of escaping:
+            # an escaped URLError here used to kill the plugin's whole start
+            # thread before it logged anything, leaving every channel down.
+            return 0, {}
         try:
             return code, (json.loads(raw.decode("utf-8")) if raw else {})
         except Exception:

@@ -102,7 +102,14 @@ plugins:
         public_url: ""                     # global fallback (see below)
         heartbeat_sec: 60                  # PATCH heartbeat interval (min 60)
         gateway_only: true                 # channels only in gateway/web processes
+        ensure_channel_on: true            # keep the reverse channel open (default)
 ```
+
+**`ensure_channel_on` — keep the reverse channel pinned on.** `true` (the
+default) holds the SSE channel to every board even when the board *could*
+reach this agent directly via `public_url`, and the heartbeat revives a
+channel thread that died (host sleep, long network loss). `false` reverts
+to direct-only delivery for boards with a pinned URL.
 
 **`public_url` — when to set it.** It is the URL a board would use to reach
 this agent *directly* (delivery falls back to direct when the channel is
@@ -226,6 +233,7 @@ hermes gateway restart
 | `PATCH /register → 409 peer registered by another identity` | The board entry belongs to a different caller token (re-registered by someone else, or your store was deleted). Ask the board admin to DELETE the entry, clear the alias from the caller store, restart. |
 | `PATCH → 403` | Your peer was revoked on that board — admin action required; do **not** re-register (the plugin won't). |
 | Directory shows you but `healthy: false` | You are direct-registered (no channel) and the board cannot reach `public_url`. Fix or empty `public_url` so the reverse channel is authoritative. |
+| Board UI shows "Reverse channel: direct" | No live channel at that moment (channel down, or the start thread died on an unreachable board — fixed: failures are contained and the heartbeat revives dead channels). Check the gateway log for `channel connected`. |
 | Channel connects but requests hang | Is the local A2A server up (`curl http://127.0.0.1:9900/health`)? Does its token list accept `A2A_SWITCHBOARD_UPSTREAM_TOKEN`? |
 | Everything worked until `hermes update` | It cannot be the plugin — updates never touch user plugins. Check whether an OLD core patch resurfaced (double registration); remove it. |
 | Log: `no token (add name=<alias>:token=…)` | Alias mismatch: `gateways[].name` must match `name=<alias>` in `A2A_SWITCHBOARD_TOKENS` exactly. |
