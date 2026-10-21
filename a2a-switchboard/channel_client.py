@@ -50,6 +50,13 @@ _BODY_CAP = 4 * 1024 * 1024
 _SSE_CONNECT_TIMEOUT = 60
 _LOCAL_FORWARD_TIMEOUT = 600
 _RESPONSE_POST_TIMEOUT = 30
+# Boards ping every ~15s while they hold OUR binding. A stale stream's
+# server-side cleanup can unbind the slot by name (restart race: old and new
+# process both connect; the loser's final cleanup evicts the winner), leaving
+# this connection alive but bound to nothing — pure silence. Re-bind quickly
+# instead of waiting for a delivery to time out.
+_SILENCE_REBIND_SEC = 75
+_WATCHDOG_POLL_SEC = 20
 
 
 class ChannelClient:
@@ -87,8 +94,11 @@ class ChannelClient:
         self._local_auth_token = (local_auth_token or "").strip()
 
         self._thread: Optional[threading.Thread] = None
+        self._watchdog: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._chan_secret: Optional[str] = None
+        self._resp: Any = None
+        self._last_activity: float = 0.0
         self._delay = _INITIAL_DELAY
 
     # ── lifecycle ────────────────────────────────────────────────────────
@@ -103,6 +113,13 @@ class ChannelClient:
             daemon=True,
         )
         self._thread.start()
+        if self._watchdog is None or not self._watchdog.is_alive():
+            self._watchdog = threading.Thread(
+                target=self._watchdog_loop,
+                name=f"a2a-channel-watchdog-{self._peer_name}",
+                daemon=True,
+            )
+            self._watchdog.start()
         logger.info(
             "a2a-switchboard[%s]: reverse channel → %s (local :%s)",
             self._peer_name, self._board_url, self._local_port,
@@ -110,15 +127,76 @@ class ChannelClient:
 
     def stop(self) -> None:
         self._stop_event.set()
+        self._kick_stale_connection()
         thread = self._thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
         self._thread = None
         logger.info("a2a-switchboard[%s]: reverse channel stopped", self._peer_name)
 
+    def _kick_stale_connection(self) -> None:
+        """Force-close the SSE response (thread-safe) to unblock the reader."""
+        resp = self._resp
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
+
+    def _watchdog_loop(self) -> None:
+        """Re-bind when the board goes silent on a live-looking connection.
+
+        Silence beyond _SILENCE_REBIND_SEC (pings arrive ~every 15s while the
+        board holds our binding) means the board unbound us — typically a
+        stale stream's cleanup evicted our slot during a restart race. Close
+        the connection so _run_loop reconnects and re-binds within seconds.
+        """
+        import time
+
+        while not self._stop_event.wait(timeout=_WATCHDOG_POLL_SEC):
+            resp = self._resp
+            if resp is None:
+                continue
+            quiet = time.monotonic() - self._last_activity
+            if quiet > _SILENCE_REBIND_SEC:
+                logger.warning(
+                    "a2a-switchboard[%s]: no board traffic for %.0fs (binding lost?) "
+                    "— forcing reconnect to re-bind",
+                    self._peer_name, quiet,
+                )
+                self._kick_stale_connection()
+
     @property
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def is_connected(self) -> bool:
+        return self._resp is not None
+
+    def board_binding_alive(self) -> Optional[bool]:
+        """Ask the BOARD whether it still holds our channel binding.
+
+        GET /.well-known/agent.json with our token and read our peer entry's
+        "channel" flag. This is authoritative: a stale stream's server-side
+        cleanup can unbind our slot while our TCP connection keeps receiving
+        axum keep-alive comments / zombie pings forever — traffic-based
+        liveness cannot see that, the directory can.
+        Returns True/False, or None when the board can't be reached/parsed.
+        """
+        try:
+            url = "{}/.well-known/agent.json".format(self._board_url)
+            req = urllib.request.Request(url, method="GET")
+            req.add_header("Authorization", f"Bearer {self._token}")
+            req.add_header("Accept", "application/json")
+            with open_credentialed_url(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            for peer in data.get("peers") or []:
+                if peer.get("name") == self._peer_name:
+                    return bool(peer.get("channel"))
+            return False  # not listed at all → not bound
+        except Exception:
+            return None
 
     # ── main loop ────────────────────────────────────────────────────────
 
@@ -152,7 +230,13 @@ class ChannelClient:
             )
             self._delay = _INITIAL_DELAY
             self._chan_secret = None
-            self._read_sse_stream(resp)
+            import time
+            self._resp = resp
+            self._last_activity = time.monotonic()
+            try:
+                self._read_sse_stream(resp)
+            finally:
+                self._resp = None
 
     def _read_sse_stream(self, resp: Any) -> None:
         event_type: Optional[str] = None
@@ -168,6 +252,8 @@ class ChannelClient:
             chunk = reader(4096)
             if not chunk:
                 break
+            import time
+            self._last_activity = time.monotonic()
             buf += chunk
             while b"\n" in buf:
                 line_bytes, buf = buf.split(b"\n", 1)
