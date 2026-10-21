@@ -75,6 +75,18 @@ hermes gateway restart
 Manual equivalent (what the native installer does): copy this directory to
 `~/.hermes/plugins/a2a-switchboard/` and restart the gateway.
 
+> Installing only copies files — the plugin stays **inactive** until you
+> configure a board and a token (next sections). Hermes' native installer
+> prints an `after-install.md` checklist with the exact `hermes config set`
+> commands; the two-step short version:
+>
+> ```bash
+> hermes config set plugins.entries.a2a-switchboard.settings.gateways \
+>   '[{"name":"fleet","url":"http://<board-host>:9920"}]'
+> hermes config set plugins.entries.a2a-switchboard.settings.peer_name <peer-name>
+> # then add A2A_SWITCHBOARD_TOKENS to ~/.hermes/.env (format below) and restart
+> ```
+
 ---
 
 ## Configure — two files, strict split
@@ -129,6 +141,8 @@ down). Rules of thumb:
 ```bash
 # Board tokens — one entry per gateway alias, semicolon-separated.
 # gateway token → pending queue (admin accepts); bootstrap → auto-accept.
+# NOTE the required `name=<alias>:token=<value>` shape — a bare `agw_...`
+# parses to zero boards and the plugin silently stays inactive.
 A2A_SWITCHBOARD_TOKENS=name=fleet:token=agw_XXXX;name=dev:token=agw_YYYY
 
 # Your upstream token — the bearer YOUR inbound A2A server accepts from
@@ -230,6 +244,7 @@ hermes gateway restart
 | Symptom | Cause → fix |
 |---|---|
 | `POST /register → 401 invalid or missing gateway token` | Board rotated/re-set its tokens. Take the new gateway/bootstrap token from the board, update `A2A_SWITCHBOARD_TOKENS`, restart. |
+| `POST /register → 422 ... missing field url` | Old plugin builds deleted `url` for firewalled peers, but the board schema requires it. Update the plugin (fix sends `public_url` or the loopback default; the reverse channel remains the delivery path). |
 | `PATCH /register → 409 peer registered by another identity` | The board entry belongs to a different caller token (re-registered by someone else, or your store was deleted). Ask the board admin to DELETE the entry, clear the alias from the caller store, restart. |
 | `PATCH → 403` | Your peer was revoked on that board — admin action required; do **not** re-register (the plugin won't). |
 | Directory shows you but `healthy: false` | You are direct-registered (no channel) and the board cannot reach `public_url`. Fix or empty `public_url` so the reverse channel is authoritative. |

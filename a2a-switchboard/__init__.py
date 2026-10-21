@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import re
 import threading
 from typing import Any, Optional
@@ -113,7 +114,7 @@ class _Runtime:
             if not load_caller_token(alias):
                 store_caller_token(alias, seed)
         upstream = (os.environ.get("A2A_SWITCHBOARD_UPSTREAM_TOKEN", "") or "").strip()
-        peer_name = str(cfg.get("peer_name") or os.uname().nodename.split(".")[0]).strip()
+        peer_name = str(cfg.get("peer_name") or platform.node().split(".")[0]).strip()
         public_url = str(cfg.get("public_url") or "").strip()
 
         try:
@@ -261,7 +262,7 @@ def _agent_card() -> Optional[dict]:
     except OSError:
         skills = []
     return {
-        "name": os.uname().nodename.split(".")[0],
+        "name": platform.node().split(".")[0],
         "description": "Hermes Agent (a2a-switchboard plugin)",
         "capabilities": {"streaming": False, "pushNotifications": False},
         "skills": skills,

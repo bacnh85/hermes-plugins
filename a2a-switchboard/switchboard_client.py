@@ -93,6 +93,14 @@ def clear_caller_token(board_name: str) -> None:
         pass
 
 
+def _default_local_port() -> int:
+    """Local inbound A2A port used as the url fallback (A2A_PORT or 9900)."""
+    try:
+        return int(os.environ.get("A2A_PORT") or 9900)
+    except (TypeError, ValueError):
+        return 9900
+
+
 class GatewayClient:
     """Registration + heartbeat state machine for ONE switchboard."""
 
@@ -216,12 +224,13 @@ class GatewayClient:
             return False
         body: dict[str, Any] = {
             "name": self.peer_name,
-            "url": self.public_url or f"http://127.0.0.1:9900/",
+            "url": self.public_url or f"http://127.0.0.1:{_default_local_port()}/",
         }
-        # A loopback fallback only makes sense for a board on this host;
-        # remote boards would probe an address they can never reach.
-        if not self.public_url and "127.0.0.1" not in self.url and "localhost" not in self.url:
-            del body["url"]
+        # url is a REQUIRED field in POST /register (board schema 422s without
+        # it), so it is always sent: public_url when configured, else the
+        # documented loopback default. For a firewalled peer the pinned url is
+        # unreachable by design — the reverse channel is the delivery path and
+        # direct fallback simply never engages.
         if self.card:
             body["card"] = self.card
         if self.upstream_token:
