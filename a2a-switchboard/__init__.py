@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import os
+import platform
 import re
 import threading
 from typing import Any, Optional
@@ -73,9 +74,26 @@ def _in_gatewayish_process() -> bool:
     if os.environ.get("_HERMES_GATEWAY") == "1":
         return True
     # The dashboard/web server imports hermes_cli.web_server.
-    return "hermes_cli.web_server" in os.environ.get("_HERMES_LOADED_MODULES", "") or bool(
+    if "hermes_cli.web_server" in os.environ.get("_HERMES_LOADED_MODULES", "") or bool(
         os.environ.get("HERMES_WEB_SERVER")
-    )
+    ):
+        return True
+    # The env markers do not survive every gateway spawn path (seen on
+    # Windows: `hermes gateway restart` → fresh process, marker gone, plugin
+    # skipped itself while RUNNING INSIDE the gateway). The pid file is
+    # written by gateway/run.py and names the CURRENT process when we are
+    # the gateway — that is authoritative.
+    try:
+        import json
+        import pathlib
+
+        pid_path = pathlib.Path(
+            os.environ.get("HERMES_HOME") or str(pathlib.Path.home() / ".hermes")
+        ) / "gateway.pid"
+        record = json.loads(pid_path.read_text(encoding="utf-8"))
+        return int(record.get("pid") or 0) == os.getpid() and record.get("kind") == "hermes-gateway"
+    except Exception:
+        return False
 
 
 class _Runtime:
@@ -113,7 +131,7 @@ class _Runtime:
             if not load_caller_token(alias):
                 store_caller_token(alias, seed)
         upstream = (os.environ.get("A2A_SWITCHBOARD_UPSTREAM_TOKEN", "") or "").strip()
-        peer_name = str(cfg.get("peer_name") or os.uname().nodename.split(".")[0]).strip()
+        peer_name = str(cfg.get("peer_name") or platform.node().split(".")[0]).strip()
         public_url = str(cfg.get("public_url") or "").strip()
 
         try:
@@ -217,17 +235,32 @@ class _Runtime:
                 # network loss). revive dead channels so "reverse" stays the
                 # steady state instead of silently decaying to direct.
                 for alias, chan in channels.items():
-                    if chan.is_running:
+                    if not chan.is_running:
+                        try:
+                            chan.start()
+                            logger.warning(
+                                "a2a-switchboard[%s]: revived dead reverse channel", alias
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "a2a-switchboard[%s]: channel revive failed: %s", alias, exc
+                            )
                         continue
-                    try:
-                        chan.start()
-                        logger.warning(
-                            "a2a-switchboard[%s]: revived dead reverse channel", alias
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "a2a-switchboard[%s]: channel revive failed: %s", alias, exc
-                        )
+                    # Binding check: the board can silently lose our slot (a
+                    # stale stream's cleanup unbinds by name during restart
+                    # races) while our connection keeps receiving keep-alives.
+                    # The board's directory is authoritative — kick the
+                    # connection when it says we are unbound; the read loop
+                    # reconnects and re-binds within seconds.
+                    if chan.is_connected:
+                        bound = chan.board_binding_alive()
+                        if bound is False:
+                            logger.warning(
+                                "a2a-switchboard[%s]: board reports no live channel binding "
+                                "(stale-cleanup eviction?) — forcing reconnect to re-bind",
+                                alias,
+                            )
+                            chan._kick_stale_connection()
 
         threading.Thread(
             target=_loop, name="a2a-switchboard-heartbeat", daemon=True
@@ -261,7 +294,7 @@ def _agent_card() -> Optional[dict]:
     except OSError:
         skills = []
     return {
-        "name": os.uname().nodename.split(".")[0],
+        "name": platform.node().split(".")[0],
         "description": "Hermes Agent (a2a-switchboard plugin)",
         "capabilities": {"streaming": False, "pushNotifications": False},
         "skills": skills,
