@@ -13,7 +13,9 @@ registration protocol (docs/INTEGRATION.md §1):
 Status-code ladder for PATCH (verified against src/peers.rs 0.7.x):
   200 keep going · 401/404 caller token dead or entry gone → clear + POST
   fallback · 405 pre-PATCH board → POST-only for the process lifetime ·
-  403 revoked / 409 foreign identity → FAIL, never re-register over it.
+  403 revoked / 409 foreign identity → FAIL, never re-register over it ·
+  0 transport failure → keep caller token, retry PATCH next beat (never
+  POST over it — the entry is still ours on the board).
 """
 
 from __future__ import annotations
@@ -186,6 +188,21 @@ class GatewayClient:
                 if code == 200:
                     self._registered = True
                     return True
+                if code == 0:
+                    # Transport failure (board slow/down/timed out) — NOT a
+                    # 401/404. The entry on the board is still ours, so
+                    # re-registering via POST would just 409 ("foreign
+                    # identity") on the next attempt. Keep the caller token
+                    # and let the next beat retry the PATCH. (Seen in the
+                    # field: board under load answered PATCH with timeouts
+                    # while POSTs burned the bootstrap token into 409s.)
+                    logger.warning(
+                        "a2a-switchboard[%s]: PATCH /register unreachable (transport); "
+                        "keeping caller token — retrying PATCH next beat",
+                        self.board_name,
+                    )
+                    self._last_beat = now
+                    return False
                 if code == 401 or code == 404:
                     # dead token / entry deleted — re-mint below
                     clear_caller_token(self.board_name)

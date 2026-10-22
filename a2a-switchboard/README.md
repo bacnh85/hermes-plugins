@@ -245,6 +245,7 @@ hermes gateway restart
 |---|---|
 | `POST /register → 401 invalid or missing gateway token` | Board rotated/re-set its tokens. Take the new gateway/bootstrap token from the board, update `A2A_SWITCHBOARD_TOKENS`, restart. |
 | `POST /register → 422 ... missing field url` | Old plugin builds deleted `url` for firewalled peers, but the board schema requires it. Update the plugin (fix sends `public_url` or the loopback default; the reverse channel remains the delivery path). |
+| `POST /register → 0 {}` then `POST /register → 409` | Board TCP-reachable but its HTTP layer slow/hung (observed: ~17 s responses under load). Old builds fell through from a timed-out PATCH to a POST, burning the bootstrap token against the still-registered entry. Fixed: transport failures (`code 0`) keep the caller token and retry PATCH next beat; only real `401/404` clear + re-mint. |
 | `PATCH /register → 409 peer registered by another identity` | The board entry belongs to a different caller token (re-registered by someone else, or your store was deleted). Ask the board admin to DELETE the entry, clear the alias from the caller store, restart. |
 | `PATCH → 403` | Your peer was revoked on that board — admin action required; do **not** re-register (the plugin won't). |
 | Directory shows you but `healthy: false` | You are direct-registered (no channel) and the board cannot reach `public_url`. Fix or empty `public_url` so the reverse channel is authoritative. |
